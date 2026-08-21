@@ -1,0 +1,103 @@
+docs/paracode-orchestration-contract-v0.1.md
+  s_c2fd48d51ead01::t_32e68988c20697 11-25,259,345-358
+  s_c2fd48d51ead01::t_d43ea0ec827844 1-10,26-258,260-344,359-453,455-592
+  s_c2fd48d51ead01::t_c40515da1b0d72 454
+eslint.config.mjs
+  s_c2fd48d51ead01::t_f428459c229d73 1-28
+vitest.config.ts
+  s_c2fd48d51ead01::t_f428459c229d73 1-8
+package.json
+  s_c2fd48d51ead01::t_f428459c229d73 1-26,28-37,39-44,46-50
+  s_c2fd48d51ead01::t_a14e1eaab3bc90 38,45
+  s_c2fd48d51ead01::t_c40515da1b0d72 27
+electron-builder.yml
+  s_c2fd48d51ead01::t_f428459c229d73 1-24
+src/preload/index.ts
+  s_c2fd48d51ead01::t_f9bbb4b4594c01 12
+  s_c2fd48d51ead01::t_f428459c229d73 1-11,13
+src/renderer/index.html
+  s_c2fd48d51ead01::t_f428459c229d73 1-13
+src/shared/ipc.ts
+  s_c2fd48d51ead01::t_f428459c229d73 1-14
+CODE_OF_CONDUCT.md
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-10
+.gitignore
+  s_c2fd48d51ead01::t_f428459c229d73 1-15
+src/renderer/src/styles.css
+  s_c2fd48d51ead01::t_f428459c229d73 1-4,14-320
+  s_c2fd48d51ead01::t_32e68988c20697 5-13
+src/preload/index.d.ts
+  s_c2fd48d51ead01::t_f428459c229d73 1-9
+.vscode/extensions.json
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-3
+electron.vite.config.ts
+  s_c2fd48d51ead01::t_f428459c229d73 1-21
+src/renderer/src/main.tsx
+  s_c2fd48d51ead01::t_f428459c229d73 1-11
+tsconfig.node.json
+  s_c2fd48d51ead01::t_f428459c229d73 1-18,20-23
+  s_c2fd48d51ead01::t_89616269bdd2c2 19
+prettier.config.mjs
+  s_c2fd48d51ead01::t_f428459c229d73 1-9
+.github/workflows/ci.yml
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-32
+  s_c2fd48d51ead01::t_c40515da1b0d72 33
+src/renderer/src/App.tsx
+  s_c2fd48d51ead01::t_f428459c229d73 1-64,66-107
+  s_c2fd48d51ead01::t_32e68988c20697 65
+.github/pull_request_template.md
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-6,8-18
+  s_c2fd48d51ead01::t_c40515da1b0d72 7
+README.md
+  s_c2fd48d51ead01::t_c40515da1b0d72 42
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-41,43-74
+.github/ISSUE_TEMPLATE/bug_report.md
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-3,5-31
+  s_c2fd48d51ead01::t_32e68988c20697 4
+src/main/ipc.ts
+  s_c2fd48d51ead01::t_f428459c229d73 1-12
+.github/ISSUE_TEMPLATE/feature_request.md
+  s_c2fd48d51ead01::t_32e68988c20697 4
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-3,5-20
+.editorconfig
+  s_c2fd48d51ead01::t_f428459c229d73 1-12
+SECURITY.md
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-13
+CHANGELOG.md
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-11
+src/shared/ipc.test.ts
+  s_c2fd48d51ead01::t_f428459c229d73 1-9
+.vscode/settings.json
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-8
+CONTRIBUTING.md
+  s_c2fd48d51ead01::t_c40515da1b0d72 10,35
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-9,11-34,36-37
+LICENSE
+  s_c2fd48d51ead01::t_3b4f7881b2fbc2 1-21
+src/main/index.ts
+  s_c2fd48d51ead01::t_f428459c229d73 1-51
+pnpm-workspace.yaml
+  s_c2fd48d51ead01::t_c593bf9fb76f37 1-3
+.npmrc
+  s_c2fd48d51ead01::t_f428459c229d73 1-2
+.github/dependabot.yml
+  s_c2fd48d51ead01::t_c40515da1b0d72 1-14
+tsconfig.web.json
+  s_c2fd48d51ead01::t_f428459c229d73 1-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "759a3ec0cf046922f5e103aee15e19429a4d2e19",
+  "prompts": {},
+  "sessions": {
+    "s_c2fd48d51ead01": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02510-0118-7cd1-aa30-6e3f6c528954",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "ptsu <ptsu@trip.com>"
+    }
+  }
+}
