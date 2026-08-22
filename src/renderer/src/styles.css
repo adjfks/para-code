@@ -235,6 +235,100 @@ h2 {
   margin-top: 20px;
 }
 
+.task-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.task-form label {
+  color: #475467;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.path-field,
+.task-form textarea {
+  width: 100%;
+  border: 1px solid #d9dee8;
+  border-radius: 7px;
+  background: #fbfcfe;
+  color: #344054;
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 10px;
+}
+
+.path-field {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.task-form .primary-button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.task-form .primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.error-message {
+  margin: 0;
+  border-radius: 7px;
+  background: #fff1f0;
+  color: #b42318;
+  font-size: 12px;
+  padding: 9px 10px;
+  white-space: pre-wrap;
+}
+
+.run-panel {
+  max-width: 980px;
+  margin-top: 18px;
+  border: 1px solid #e1e5ec;
+  border-radius: 9px;
+  background: #fff;
+  padding: 20px 24px;
+}
+
+.run-path {
+  overflow: hidden;
+  color: #667085;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.event-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px;
+  border-top: 1px solid #eef1f5;
+  color: #667085;
+  font-size: 12px;
+  padding-top: 8px;
+}
+
+.event-row span:first-child {
+  color: #344054;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 .panel-heading {
   display: flex;
   align-items: flex-start;
