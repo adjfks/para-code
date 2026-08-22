@@ -31,7 +31,7 @@ describe('DefaultOrchestrator', () => {
     })
 
     await waitFor(
-      () => repository.get(snapshot.run.id).then((value) => value?.events.length === 7),
+      () => repository.get(snapshot.run.id).then((value) => value?.events.length === 12),
       repository,
       snapshot.run.id,
     )
@@ -43,7 +43,12 @@ describe('DefaultOrchestrator', () => {
       'session_started',
       'phase_changed',
       'progress',
+      'tool_started',
+      'progress',
+      'tool_finished',
       'phase_changed',
+      'tool_finished',
+      'progress',
       'phase_changed',
       'test_result',
       'session_completed',
@@ -62,6 +67,57 @@ describe('DefaultOrchestrator', () => {
     await expect(
       orchestrator.startTask({ repositoryPath, requirement: '应该被拒绝' }),
     ).rejects.toThrow('主工作区不干净')
+  })
+
+  it('stops an active agent and preserves the isolated worktree', async () => {
+    const repositoryPath = await createRepository()
+    const repository = new MemoryRunRepository()
+    const orchestrator = new DefaultOrchestrator(
+      new GitWorktreeManager(),
+      new FakeAgentProvider(),
+      repository,
+    )
+
+    const events: string[] = []
+    orchestrator.onEvent((event) => events.push(event.type))
+    const snapshot = await orchestrator.startTask({
+      repositoryPath,
+      requirement: '停止这个演示任务',
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    const stopped = await orchestrator.stopTask(snapshot.run.id)
+    await new Promise((resolve) => setTimeout(resolve, 120))
+
+    expect(stopped.run.status).toBe('canceled')
+    expect(stopped.run.worktreePath).toContain('.paracode/worktrees')
+    expect(events).toContain('session_canceled')
+    expect(events).not.toContain('session_completed')
+    expect((await orchestrator.getRun(snapshot.run.id))?.run.status).toBe('canceled')
+  })
+
+  it('makes concurrent stop requests idempotent', async () => {
+    const repositoryPath = await createRepository()
+    const repository = new MemoryRunRepository()
+    const orchestrator = new DefaultOrchestrator(
+      new GitWorktreeManager(),
+      new FakeAgentProvider(),
+      repository,
+    )
+
+    const snapshot = await orchestrator.startTask({
+      repositoryPath,
+      requirement: '幂等停止任务',
+    })
+    const [first, second] = await Promise.all([
+      orchestrator.stopTask(snapshot.run.id),
+      orchestrator.stopTask(snapshot.run.id),
+    ])
+    const stopped = await orchestrator.getRun(snapshot.run.id)
+
+    expect(first.run.status).toBe('canceled')
+    expect(second.run.status).toBe('canceled')
+    expect(stopped?.events.filter((event) => event.type === 'session_canceled')).toHaveLength(1)
   })
 })
 

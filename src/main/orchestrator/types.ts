@@ -23,6 +23,7 @@ export interface AgentProvider {
     context: AgentRunContext,
     emit: (event: Omit<AgentEvent, 'id' | 'runId' | 'sequence' | 'timestamp'>) => void,
   ): Promise<{ agentSessionId: string }>
+  stop(agentSessionId: string): Promise<void>
 }
 
 export interface RunRepository {
@@ -32,6 +33,7 @@ export interface RunRepository {
 
 export interface Orchestrator {
   startTask(input: StartTaskInput): Promise<RunSnapshot>
+  stopTask(runId: string): Promise<RunSnapshot>
   getRun(runId: string): Promise<RunSnapshot | undefined>
   onEvent(listener: (event: AgentEvent) => void): () => void
 }

@@ -11,6 +11,12 @@ interface JsonRpcResponse {
   error?: { message?: string }
 }
 
+interface JsonRpcServerRequest {
+  id: number
+  method: string
+  params?: Record<string, unknown>
+}
+
 interface JsonRpcNotification {
   method?: string
   params?: Record<string, unknown>
@@ -18,6 +24,7 @@ interface JsonRpcNotification {
 
 export class CodexAppServerProvider implements AgentProvider {
   private readonly command: string
+  private readonly sessions = new Map<string, ActiveCodexSession>()
 
   constructor(command = process.env.PARACODE_CODEX_BIN ?? 'codex') {
     this.command = command
@@ -34,12 +41,32 @@ export class CodexAppServerProvider implements AgentProvider {
     })
     const client = new JsonRpcClient(processHandle)
     const agentSessionId = `codex-${randomUUID()}`
+    const session: ActiveCodexSession = {
+      client,
+      processHandle,
+      threadId: undefined,
+      turnId: undefined,
+      stopping: false,
+    }
+    this.sessions.set(agentSessionId, session)
 
     client.onNotification((notification) => {
+      updateTurnId(session, notification)
+      if (session.stopping) return
       const event = mapCodexNotification(notification, agentSessionId)
       if (event) emit(event)
     })
+    client.onServerRequest((request) => {
+      if (session.stopping) return
+      const event = mapCodexNotification(
+        { method: request.method, params: request.params },
+        agentSessionId,
+        request.id,
+      )
+      if (event) emit(event)
+    })
     processHandle.stderr.on('data', (chunk: Buffer) => {
+      if (session.stopping) return
       const message = chunk.toString().trim()
       if (message) {
         emit({
@@ -50,43 +77,108 @@ export class CodexAppServerProvider implements AgentProvider {
       }
     })
 
-    await client.request('initialize', {
-      clientInfo: { name: 'paracode', version: '0.1.0' },
-      capabilities: {},
-    })
-    client.notify('initialized', {})
-    const thread = await client.request('thread/start', {
-      cwd: context.worktreePath,
-      approvalPolicy: 'on-request',
-      sandbox: 'workspace-write',
-      personality: 'pragmatic',
-      serviceName: 'paracode',
-    })
-    const threadId = readString(thread.result?.thread, 'id')
+    try {
+      await client.request('initialize', {
+        clientInfo: { name: 'paracode', version: '0.1.0' },
+        capabilities: {},
+      })
+      client.notify('initialized', {})
+      const thread = await client.request('thread/start', {
+        cwd: context.worktreePath,
+        approvalPolicy: 'on-request',
+        sandbox: 'workspace-write',
+        personality: 'pragmatic',
+        serviceName: 'paracode',
+      })
+      const threadId = readString(thread.result?.thread, 'id')
+      session.threadId = threadId
 
-    emit({
-      agentSessionId,
-      type: 'session_started',
-      payload: { provider: 'codex-app-server', threadId },
-    })
+      emit({
+        agentSessionId,
+        type: 'session_started',
+        payload: { provider: 'codex-app-server', threadId },
+      })
 
-    await client.request('turn/start', {
-      threadId,
-      cwd: context.worktreePath,
-      input: [
-        {
-          type: 'text',
-          text: [
-            '你正在 ParaCode 的独立 worktree 中工作。',
-            `需求：${context.requirement}`,
-            `基准引用：${context.baseRef}`,
-            '只修改当前 worktree 内的文件，完成后运行相关测试，并总结变更。',
-          ].join('\n'),
-        },
-      ],
-    })
+      const turn = await client.request('turn/start', {
+        threadId,
+        cwd: context.worktreePath,
+        input: [
+          {
+            type: 'text',
+            text: [
+              '你正在 ParaCode 的独立 worktree 中工作。',
+              `需求：${context.requirement}`,
+              `基准引用：${context.baseRef}`,
+              '只修改当前 worktree 内的文件，完成后运行相关测试，并总结变更。',
+            ].join('\n'),
+          },
+        ],
+      })
+      session.turnId = readString(turn.result?.turn, 'id')
 
-    return { agentSessionId }
+      return { agentSessionId }
+    } catch (error) {
+      session.stopping = true
+      this.sessions.delete(agentSessionId)
+      if (!processHandle.killed) processHandle.kill()
+      throw error
+    }
+  }
+
+  async stop(agentSessionId: string): Promise<void> {
+    const session = this.sessions.get(agentSessionId)
+    if (!session) return
+    session.stopping = true
+    try {
+      if (session.threadId && session.turnId) {
+        await withTimeout(
+          session.client.request('turn/interrupt', {
+            threadId: session.threadId,
+            turnId: session.turnId,
+          }),
+          3_000,
+        )
+      }
+    } catch {
+      // The process may already have exited; killing it below is still safe.
+    } finally {
+      this.disposeSession(agentSessionId, session)
+    }
+  }
+
+  private disposeSession(agentSessionId: string, session: ActiveCodexSession): void {
+    session.stopping = true
+    if (!session.processHandle.killed) session.processHandle.kill()
+    this.sessions.delete(agentSessionId)
+  }
+}
+
+interface ActiveCodexSession {
+  client: JsonRpcClient
+  processHandle: ChildProcessWithoutNullStreams
+  threadId?: string
+  turnId?: string
+  stopping: boolean
+}
+
+function updateTurnId(session: ActiveCodexSession, notification: JsonRpcNotification): void {
+  if (notification.method !== 'turn/started') return
+  const turn = asRecord(notification.params?.turn)
+  const turnId = asString(turn?.id) ?? asString(notification.params?.turnId)
+  if (turnId) session.turnId = turnId
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Codex interrupt timed out')), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
   }
 }
 
@@ -100,6 +192,7 @@ class JsonRpcClient {
     }
   >()
   private notificationListener?: (notification: JsonRpcNotification) => void
+  private serverRequestListener?: (request: JsonRpcServerRequest) => void
 
   constructor(private readonly processHandle: ChildProcessWithoutNullStreams) {
     const lines = createInterface({ input: processHandle.stdout })
@@ -131,6 +224,10 @@ class JsonRpcClient {
     this.notificationListener = listener
   }
 
+  onServerRequest(listener: (request: JsonRpcServerRequest) => void): void {
+    this.serverRequestListener = listener
+  }
+
   private write(message: Record<string, unknown>): void {
     this.processHandle.stdin.write(`${JSON.stringify(message)}\n`)
   }
@@ -141,6 +238,14 @@ class JsonRpcClient {
     try {
       message = JSON.parse(line) as JsonRpcResponse & JsonRpcNotification
     } catch {
+      return
+    }
+    if (typeof message.id === 'number' && typeof message.method === 'string') {
+      this.serverRequestListener?.({
+        id: message.id,
+        method: message.method,
+        params: message.params,
+      })
       return
     }
     if (typeof message.id === 'number') {
@@ -158,27 +263,123 @@ class JsonRpcClient {
 function mapCodexNotification(
   notification: JsonRpcNotification,
   agentSessionId: string,
+  requestId?: number,
 ): Omit<AgentEvent, 'id' | 'runId' | 'sequence' | 'timestamp'> | undefined {
   const method = notification.method
   if (!method) return undefined
   const payload = notification.params ?? {}
+  const item = asRecord(payload.item)
+  const turn = asRecord(payload.turn)
+  const itemType = asString(item?.type)
+  const itemId = asString(item?.id) ?? asString(payload.itemId)
+  const turnId = asString(turn?.id) ?? asString(payload.turnId)
+  const commonPayload = {
+    ...payload,
+    ...(requestId === undefined ? {} : { requestId }),
+    ...(itemId ? { itemId } : {}),
+    ...(turnId ? { turnId } : {}),
+    ...(itemType ? { itemType } : {}),
+  }
 
   if (method === 'turn/started') {
-    return { agentSessionId, type: 'phase_changed', payload: { phase: 'planning', ...payload } }
+    return {
+      agentSessionId,
+      type: 'phase_changed',
+      payload: { ...commonPayload, phase: 'planning' },
+    }
   }
   if (method === 'turn/completed') {
-    return { agentSessionId, type: 'session_completed', payload }
+    const status = asString(turn?.status) ?? asString(payload.status)
+    if (status === 'failed')
+      return { agentSessionId, type: 'session_failed', payload: commonPayload }
+    if (status === 'interrupted') {
+      return { agentSessionId, type: 'session_paused', payload: commonPayload }
+    }
+    return { agentSessionId, type: 'session_completed', payload: commonPayload }
   }
   if (method.includes('requestApproval')) {
-    return { agentSessionId, type: 'approval_request', payload: { method, ...payload } }
+    return { agentSessionId, type: 'approval_request', payload: { ...commonPayload, method } }
+  }
+  if (method.includes('requestUserInput') || method === 'mcpServer/elicitation/request') {
+    return { agentSessionId, type: 'question', payload: { ...commonPayload, method } }
   }
   if (method === 'item/agentMessage/delta') {
-    return { agentSessionId, type: 'progress', payload: { ...payload, stream: 'agent' } }
+    const delta = asString(payload.delta) ?? asString(payload.text)
+    return {
+      agentSessionId,
+      type: 'progress',
+      payload: { ...commonPayload, stream: 'agent', ...(delta ? { delta, message: delta } : {}) },
+    }
+  }
+  if (method === 'item/commandExecution/outputDelta') {
+    const delta = asString(payload.delta) ?? asString(payload.output)
+    return {
+      agentSessionId,
+      type: 'progress',
+      payload: { ...commonPayload, stream: 'tool', ...(delta ? { output: delta } : {}) },
+    }
+  }
+  if (method === 'turn/plan/updated') {
+    return {
+      agentSessionId,
+      type: 'progress',
+      payload: { ...commonPayload, stream: 'plan', message: asString(payload.explanation) },
+    }
+  }
+  if (method === 'turn/diff/updated') {
+    return { agentSessionId, type: 'progress', payload: { ...commonPayload, stream: 'diff' } }
+  }
+  if (method === 'item/started') {
+    if (itemType === 'commandExecution' || itemType === 'fileChange') {
+      return {
+        agentSessionId,
+        type: 'tool_started',
+        payload: {
+          ...commonPayload,
+          tool: itemType,
+          command: asString(item?.command),
+          status: asString(item?.status) ?? 'running',
+        },
+      }
+    }
+    return { agentSessionId, type: 'progress', payload: { ...commonPayload, stream: 'system' } }
+  }
+  if (method === 'item/completed') {
+    if (itemType === 'commandExecution' || itemType === 'fileChange') {
+      return {
+        agentSessionId,
+        type: 'tool_finished',
+        payload: {
+          ...commonPayload,
+          tool: itemType,
+          command: asString(item?.command),
+          status: asString(item?.status) ?? 'completed',
+          output: asString(item?.aggregatedOutput),
+        },
+      }
+    }
+    return { agentSessionId, type: 'progress', payload: { ...commonPayload, stream: 'system' } }
   }
   if (method.startsWith('item/')) {
-    return { agentSessionId, type: 'tool_finished', payload: { method, ...payload } }
+    return {
+      agentSessionId,
+      type: 'progress',
+      payload: { ...commonPayload, method, stream: 'system' },
+    }
   }
-  return { agentSessionId, type: 'progress', payload: { method, ...payload } }
+  return {
+    agentSessionId,
+    type: 'progress',
+    payload: { ...commonPayload, method, stream: 'system' },
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
 }
 
 function readString(value: unknown, key: string): string {

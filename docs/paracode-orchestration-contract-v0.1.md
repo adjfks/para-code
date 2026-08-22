@@ -356,6 +356,7 @@ MVP 事件类型：
 | `session_paused` / `session_resumed` | 暂停和恢复                           |
 | `session_completed`                  | 任务完成                             |
 | `session_failed`                     | 任务失败                             |
+| `session_canceled`                   | 用户主动停止任务                     |
 
 事件必须带递增 `sequence`，客户端断线重连时可以从最后一个 sequence 继续拉取。
 

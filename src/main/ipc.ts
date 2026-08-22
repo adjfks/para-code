@@ -34,6 +34,10 @@ export function registerIpcHandlers(): void {
     return orchestrator.startTask(input)
   })
 
+  ipcMain.handle(IPC_CHANNELS.stopTask, async (_event, runId: string) => {
+    return orchestrator.stopTask(runId)
+  })
+
   orchestrator.onEvent((event) => {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(IPC_CHANNELS.runEvent, event)

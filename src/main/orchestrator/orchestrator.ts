@@ -6,6 +6,8 @@ import type { AgentProvider, Orchestrator, RunRepository, WorktreeManager } from
 export class DefaultOrchestrator implements Orchestrator {
   private readonly listeners = new Set<(event: AgentEvent) => void>()
   private readonly eventChains = new Map<string, Promise<void>>()
+  private readonly agentSessions = new Map<string, string>()
+  private readonly stopTasks = new Map<string, Promise<RunSnapshot>>()
 
   constructor(
     private readonly worktrees: WorktreeManager,
@@ -60,6 +62,7 @@ export class DefaultOrchestrator implements Orchestrator {
         },
         (event) => this.enqueueEvent(run.id, event),
       )
+      this.agentSessions.set(run.id, agentResult.agentSessionId)
       await this.waitForEvents(run.id)
       snapshot = {
         ...(await this.getRunOrThrow(run.id)),
@@ -70,12 +73,43 @@ export class DefaultOrchestrator implements Orchestrator {
         },
       }
       await this.repository.save(snapshot)
+      if (!isActiveStatus(snapshot.run.status)) this.agentSessions.delete(run.id)
       return snapshot
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       snapshot = await this.updateStatus(await this.getRunOrThrow(run.id), 'failed', message)
       throw error
     }
+  }
+
+  async stopTask(runId: string): Promise<RunSnapshot> {
+    const existing = this.stopTasks.get(runId)
+    if (existing) return existing
+
+    const pending = this.stopTaskInternal(runId)
+    this.stopTasks.set(runId, pending)
+    try {
+      return await pending
+    } finally {
+      if (this.stopTasks.get(runId) === pending) this.stopTasks.delete(runId)
+    }
+  }
+
+  private async stopTaskInternal(runId: string): Promise<RunSnapshot> {
+    const snapshot = await this.getRunOrThrow(runId)
+    if (!isActiveStatus(snapshot.run.status)) return snapshot
+
+    const agentSessionId = snapshot.run.agentSessionId ?? this.agentSessions.get(runId)
+    if (agentSessionId) await this.agent.stop(agentSessionId)
+
+    this.enqueueEvent(runId, {
+      agentSessionId,
+      type: 'session_canceled',
+      payload: { message: '任务已停止，当前 worktree 修改已保留。' },
+    })
+    await this.waitForEvents(runId)
+    this.agentSessions.delete(runId)
+    return this.getRunOrThrow(runId)
   }
 
   async getRun(runId: string): Promise<RunSnapshot | undefined> {
@@ -116,7 +150,8 @@ export class DefaultOrchestrator implements Orchestrator {
     }
     const stored = this.repository.appendEvent?.(runId, agentEvent)
     const next = stored ?? { ...snapshot, events: [...snapshot.events, agentEvent] }
-    const nextStatus = statusForEvent(event.type)
+    const nextStatus =
+      next.run.status === 'canceled' ? undefined : statusForEvent(event.type, event.payload)
     const finalSnapshot = {
       ...next,
       run: {
@@ -128,6 +163,9 @@ export class DefaultOrchestrator implements Orchestrator {
       },
     }
     await this.repository.save(finalSnapshot)
+    if (['session_completed', 'session_failed', 'session_canceled'].includes(event.type)) {
+      this.agentSessions.delete(runId)
+    }
     for (const listener of this.listeners) listener(agentEvent)
   }
 
@@ -152,14 +190,27 @@ export class DefaultOrchestrator implements Orchestrator {
   }
 }
 
-function statusForEvent(type: AgentEvent['type']): RunStatus | undefined {
+function isActiveStatus(status: RunStatus): boolean {
+  return ['creating', 'bootstrapping', 'planning', 'coding', 'testing', 'waiting_human'].includes(
+    status,
+  )
+}
+
+function statusForEvent(
+  type: AgentEvent['type'],
+  payload: Record<string, unknown> = {},
+): RunStatus | undefined {
   const mapping: Partial<Record<AgentEvent['type'], RunStatus>> = {
     session_started: 'planning',
-    phase_changed: 'coding',
     approval_request: 'waiting_human',
     test_result: 'testing',
     session_completed: 'ready_for_review',
     session_failed: 'failed',
+    session_canceled: 'canceled',
+  }
+  if (type === 'phase_changed') {
+    const phase = payload.phase
+    if (phase === 'planning' || phase === 'coding' || phase === 'testing') return phase
   }
   return mapping[type]
 }
