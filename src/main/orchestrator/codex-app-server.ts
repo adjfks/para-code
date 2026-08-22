@@ -58,7 +58,7 @@ export class CodexAppServerProvider implements AgentProvider {
     const thread = await client.request('thread/start', {
       cwd: context.worktreePath,
       approvalPolicy: 'on-request',
-      sandbox: 'workspaceWrite',
+      sandbox: 'workspace-write',
       personality: 'pragmatic',
       serviceName: 'paracode',
     })

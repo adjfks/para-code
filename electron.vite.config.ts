@@ -9,6 +9,15 @@ export default defineConfig({
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].cjs',
+          chunkFileNames: '[name]-[hash].cjs',
+        },
+      },
+    },
   },
   renderer: {
     plugins: [react()],

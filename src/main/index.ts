@@ -18,7 +18,7 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: path.join(__dirname, '../preload/index.mjs'),
+      preload: path.join(__dirname, '../preload/index.cjs'),
     },
   })
 
