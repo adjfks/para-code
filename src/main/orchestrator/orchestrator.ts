@@ -8,6 +8,8 @@ export class DefaultOrchestrator implements Orchestrator {
   private readonly eventChains = new Map<string, Promise<void>>()
   private readonly agentSessions = new Map<string, string>()
   private readonly stopTasks = new Map<string, Promise<RunSnapshot>>()
+  private readonly cancelRequested = new Set<string>()
+  private readonly worktreeTasks = new Map<string, Promise<unknown>>()
 
   constructor(
     private readonly worktrees: WorktreeManager,
@@ -31,13 +33,34 @@ export class DefaultOrchestrator implements Orchestrator {
       updatedAt: now,
     }
     if (!run.requirement) throw new Error('需求不能为空。')
+    await this.worktrees.validate?.(input)
 
     let snapshot: RunSnapshot = { run, events: [] }
     await this.repository.save(snapshot)
-    snapshot = await this.updateStatus(snapshot, 'creating', '正在检查 Git 并创建 worktree。')
+    snapshot = await this.updateStatus(
+      snapshot,
+      'creating',
+      '正在检查 Git 并创建 worktree。',
+      false,
+    )
 
+    setTimeout(() => {
+      void this.executeTask(run.id, input)
+    }, 0)
+    return snapshot
+  }
+
+  private async executeTask(runId: string, input: StartTaskInput): Promise<void> {
     try {
-      const worktree = await this.worktrees.create({ ...input, runId: run.id })
+      const worktreeTask = this.worktrees.create({ ...input, runId })
+      this.worktreeTasks.set(runId, worktreeTask)
+      let worktree
+      try {
+        worktree = await worktreeTask
+      } finally {
+        this.worktreeTasks.delete(runId)
+      }
+      let snapshot = await this.getRunOrThrow(runId)
       snapshot = {
         ...snapshot,
         run: {
@@ -48,37 +71,39 @@ export class DefaultOrchestrator implements Orchestrator {
         },
       }
       await this.repository.save(snapshot)
-      snapshot = await this.updateStatus(
-        snapshot,
-        'bootstrapping',
-        'worktree 已创建，正在启动 Agent。',
-      )
+      if (this.cancelRequested.has(runId) || !isActiveStatus(snapshot.run.status)) return
+      await this.emitStatus(runId, 'bootstrapping', 'worktree 已创建，正在启动 Agent。')
+      snapshot = await this.getRunOrThrow(runId)
+      if (this.cancelRequested.has(runId) || !isActiveStatus(snapshot.run.status)) return
       const agentResult = await this.agent.start(
         {
-          runId: run.id,
+          runId,
           worktreePath: worktree.worktreePath,
-          requirement: run.requirement,
+          requirement: snapshot.run.requirement,
           baseRef: worktree.baseRef,
         },
-        (event) => this.enqueueEvent(run.id, event),
+        (event) => this.enqueueEvent(runId, event),
       )
-      this.agentSessions.set(run.id, agentResult.agentSessionId)
-      await this.waitForEvents(run.id)
+      this.agentSessions.set(runId, agentResult.agentSessionId)
+      snapshot = await this.getRunOrThrow(runId)
       snapshot = {
-        ...(await this.getRunOrThrow(run.id)),
+        ...snapshot,
         run: {
-          ...(await this.getRunOrThrow(run.id)).run,
+          ...snapshot.run,
           agentSessionId: agentResult.agentSessionId,
           updatedAt: new Date().toISOString(),
         },
       }
       await this.repository.save(snapshot)
-      if (!isActiveStatus(snapshot.run.status)) this.agentSessions.delete(run.id)
-      return snapshot
+      if (this.cancelRequested.has(runId)) {
+        await this.agent.stop(agentResult.agentSessionId)
+        this.agentSessions.delete(runId)
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      snapshot = await this.updateStatus(await this.getRunOrThrow(run.id), 'failed', message)
-      throw error
+      const snapshot = await this.getRunOrThrow(runId)
+      if (this.cancelRequested.has(runId) || snapshot.run.status === 'canceled') return
+      await this.updateStatus(snapshot, 'failed', message)
     }
   }
 
@@ -99,8 +124,14 @@ export class DefaultOrchestrator implements Orchestrator {
     const snapshot = await this.getRunOrThrow(runId)
     if (!isActiveStatus(snapshot.run.status)) return snapshot
 
+    this.cancelRequested.add(runId)
+
     const agentSessionId = snapshot.run.agentSessionId ?? this.agentSessions.get(runId)
-    if (agentSessionId) await this.agent.stop(agentSessionId)
+    if (agentSessionId) {
+      await this.agent.stop(agentSessionId)
+    } else {
+      await this.worktreeTasks.get(runId)?.catch(() => undefined)
+    }
 
     this.enqueueEvent(runId, {
       agentSessionId,
@@ -125,13 +156,31 @@ export class DefaultOrchestrator implements Orchestrator {
     snapshot: RunSnapshot,
     status: RunStatus,
     message: string,
+    publish = true,
   ): Promise<RunSnapshot> {
     const next = {
       ...snapshot,
       run: { ...snapshot.run, status, latestMessage: message, updatedAt: new Date().toISOString() },
     }
     await this.repository.save(next)
+    if (publish) {
+      this.enqueueEvent(snapshot.run.id, {
+        type: 'run_status_changed',
+        payload: {
+          status,
+          message,
+          worktreePath: next.run.worktreePath,
+          branchName: next.run.branchName,
+          baseRef: next.run.baseRef,
+        },
+      })
+    }
     return next
+  }
+
+  private async emitStatus(runId: string, status: RunStatus, message: string): Promise<void> {
+    const snapshot = await this.getRunOrThrow(runId)
+    await this.updateStatus(snapshot, status, message)
   }
 
   private async handleEvent(
@@ -202,17 +251,36 @@ function statusForEvent(
 ): RunStatus | undefined {
   const mapping: Partial<Record<AgentEvent['type'], RunStatus>> = {
     session_started: 'planning',
+    run_status_changed: undefined,
     approval_request: 'waiting_human',
     test_result: 'testing',
     session_completed: 'ready_for_review',
     session_failed: 'failed',
     session_canceled: 'canceled',
   }
+  if (type === 'run_status_changed') {
+    const status = payload.status
+    if (typeof status === 'string' && status in STATUS_VALUES) return status as RunStatus
+  }
   if (type === 'phase_changed') {
     const phase = payload.phase
     if (phase === 'planning' || phase === 'coding' || phase === 'testing') return phase
   }
   return mapping[type]
+}
+
+const STATUS_VALUES: Record<RunStatus, true> = {
+  proposed: true,
+  creating: true,
+  bootstrapping: true,
+  planning: true,
+  coding: true,
+  waiting_human: true,
+  testing: true,
+  ready_for_review: true,
+  completed: true,
+  failed: true,
+  canceled: true,
 }
 
 function latestMessage(payload: Record<string, unknown>): string | undefined {

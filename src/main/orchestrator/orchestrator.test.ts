@@ -30,8 +30,14 @@ describe('DefaultOrchestrator', () => {
       requirement: '添加 greeting 函数',
     })
 
+    expect(snapshot.run.status).toBe('creating')
     await waitFor(
-      () => repository.get(snapshot.run.id).then((value) => value?.events.length === 12),
+      () =>
+        repository
+          .get(snapshot.run.id)
+          .then(
+            (value) => value?.events.some((event) => event.type === 'session_completed') ?? false,
+          ),
       repository,
       snapshot.run.id,
     )
@@ -39,21 +45,13 @@ describe('DefaultOrchestrator', () => {
 
     expect(completed?.run.status).toBe('ready_for_review')
     expect(completed?.run.worktreePath).toContain('.paracode/worktrees')
-    expect(events).toEqual([
-      'session_started',
-      'phase_changed',
-      'progress',
-      'tool_started',
-      'progress',
-      'tool_finished',
-      'phase_changed',
-      'tool_finished',
-      'progress',
-      'phase_changed',
-      'test_result',
-      'session_completed',
-    ])
-  })
+    expect(events).toContain('session_started')
+    expect(events).toContain('reasoning')
+    expect(events).toContain('plan_updated')
+    expect(events).toContain('activity_started')
+    expect(events).toContain('activity_completed')
+    expect(events).toContain('session_completed')
+  }, 30_000)
 
   it('rejects a dirty main worktree before creating a run', async () => {
     const repositoryPath = await createRepository()
@@ -145,7 +143,7 @@ async function waitFor(
   repository: MemoryRunRepository,
   runId: string,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     if (await check()) return
     await new Promise((resolve) => setTimeout(resolve, 30))
   }

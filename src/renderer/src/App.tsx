@@ -10,7 +10,22 @@ import type {
 
 type LoadState = 'loading' | 'ready' | 'error'
 type View = 'session' | 'board' | 'queue'
-type TimelineKind = 'message' | 'activity' | 'test' | 'attention' | 'system'
+type TimelineKind =
+  'message' | 'reasoning' | 'plan' | 'activityGroup' | 'test' | 'attention' | 'system'
+
+interface ActivityEntry {
+  id: string
+  title: string
+  body?: string
+  detail?: string
+  status?: 'running' | 'completed' | 'failed' | 'waiting'
+  timestamp: string
+}
+
+interface PlanStep {
+  step: string
+  status: 'pending' | 'inProgress' | 'completed'
+}
 
 interface TimelineEntry {
   id: string
@@ -20,6 +35,8 @@ interface TimelineEntry {
   detail?: string
   status?: 'running' | 'completed' | 'failed' | 'waiting'
   timestamp: string
+  items?: ActivityEntry[]
+  plan?: PlanStep[]
 }
 
 const STATUS_LABELS: Record<RunStatus, string> = {
@@ -82,6 +99,10 @@ function App(): React.JSX.Element {
             run: {
               ...current.run,
               status: nextStatus ?? current.run.status,
+              worktreePath:
+                payloadString(event.payload, 'worktreePath') ?? current.run.worktreePath,
+              branchName: payloadString(event.payload, 'branchName') ?? current.run.branchName,
+              baseRef: payloadString(event.payload, 'baseRef') ?? current.run.baseRef,
               latestMessage: message ?? current.run.latestMessage,
               updatedAt: event.timestamp,
             },
@@ -97,6 +118,9 @@ function App(): React.JSX.Element {
   const queueCount = events.filter(
     (event) => event.type === 'question' || event.type === 'approval_request',
   ).length
+  const currentActivity = timeline
+    .flatMap((entry) => (entry.kind === 'activityGroup' ? (entry.items ?? []) : []))
+    .find((entry) => entry.status === 'running')
 
   async function selectProject(): Promise<void> {
     try {
@@ -282,6 +306,7 @@ function App(): React.JSX.Element {
             requirement={requirement}
             run={run}
             timeline={timeline}
+            currentActivity={currentActivity}
             actionState={actionState}
             errorMessage={errorMessage}
             onRequirementChange={setRequirement}
@@ -307,6 +332,7 @@ function SessionView({
   requirement,
   run,
   timeline,
+  currentActivity,
   actionState,
   errorMessage,
   onRequirementChange,
@@ -319,6 +345,7 @@ function SessionView({
   requirement: string
   run?: RunSnapshot
   timeline: TimelineEntry[]
+  currentActivity?: ActivityEntry
   actionState: 'idle' | 'starting' | 'stopping' | 'error'
   errorMessage?: string
   onRequirementChange: (value: string) => void
@@ -380,8 +407,9 @@ function SessionView({
               <div className="message-label">你</div>
               <div className="user-bubble">{run.run.requirement}</div>
             </div>
-            {timeline.length === 0 ? (
-              <div className="timeline-empty">正在等待 Agent 返回第一条消息…</div>
+            {timeline.length === 0 ? <ExecutionState run={run} /> : null}
+            {timeline.length > 0 && isActiveStatus(run.run.status) ? (
+              <ExecutionState run={run} currentActivity={currentActivity} compact />
             ) : null}
             {timeline.map((entry) => (
               <TimelineItem entry={entry} key={entry.id} />
@@ -486,7 +514,14 @@ function BoardView({
           </div>
           <p>{run.run.requirement}</p>
           <div className="worktree-stats">
-            <span>{timeline.filter((entry) => entry.kind === 'activity').length} 个活动</span>
+            <span>
+              {timeline.reduce(
+                (count, entry) =>
+                  count + (entry.kind === 'activityGroup' ? (entry.items?.length ?? 0) : 0),
+                0,
+              )}{' '}
+              个活动
+            </span>
             <span>{timeline.filter((entry) => entry.kind === 'test').length} 个测试结果</span>
             <span>{run.run.latestMessage ?? '等待 Agent 更新'}</span>
           </div>
@@ -571,8 +606,17 @@ function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Element {
     )
   }
 
-  const isCollapsible = entry.kind === 'activity'
+  const isCollapsible =
+    entry.kind === 'activityGroup' || entry.kind === 'reasoning' || entry.kind === 'plan'
   const summaryDetail = entry.detail ?? (entry.body ? shorten(entry.body, 80) : undefined)
+  const activityItems = entry.items ?? []
+  const activityRunning = activityItems.some((item) => item.status === 'running')
+  const activityTitle =
+    entry.kind === 'activityGroup'
+      ? activityRunning
+        ? `正在执行 ${activityItems.length} 个活动`
+        : `已执行 ${activityItems.length} 个活动`
+      : entry.title
 
   return (
     <div className={`timeline-item ${entry.kind} ${entry.status ?? ''}`}>
@@ -581,9 +625,13 @@ function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Element {
           ? '✓'
           : entry.kind === 'attention'
             ? '!'
-            : entry.kind === 'activity'
-              ? '›'
-              : '·'}
+            : entry.kind === 'activityGroup'
+              ? activityRunning
+                ? '◌'
+                : '›'
+              : entry.kind === 'reasoning'
+                ? '✦'
+                : '·'}
       </div>
       <div className="timeline-content">
         {isCollapsible ? (
@@ -594,7 +642,7 @@ function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Element {
             onClick={() => setExpanded((value) => !value)}
           >
             <span className="timeline-title">
-              <strong>{entry.title}</strong>
+              <strong>{activityTitle}</strong>
               {summaryDetail ? (
                 <code className="timeline-summary-detail">{summaryDetail}</code>
               ) : null}
@@ -610,11 +658,61 @@ function TimelineItem({ entry }: { entry: TimelineEntry }): React.JSX.Element {
             <time>{formatTime(entry.timestamp)}</time>
           </div>
         )}
-        {(!isCollapsible || expanded) && entry.body ? <p>{entry.body}</p> : null}
+        {entry.kind === 'activityGroup' && expanded ? (
+          <div className="activity-list">
+            {activityItems.map((item) => (
+              <div className={`activity-row ${item.status ?? ''}`} key={item.id}>
+                <span className="activity-row-icon" aria-hidden="true">
+                  {item.status === 'running' ? '◌' : item.status === 'failed' ? '!' : '✓'}
+                </span>
+                <div>
+                  <strong>{item.title}</strong>
+                  {item.detail ? <code>{item.detail}</code> : null}
+                  {item.body ? <p>{item.body}</p> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {entry.kind !== 'activityGroup' && (!isCollapsible || expanded) && entry.body ? (
+          <p>{entry.body}</p>
+        ) : null}
+        {entry.kind === 'plan' && expanded && entry.plan?.length ? (
+          <ol className="plan-list">
+            {entry.plan.map((step) => (
+              <li className={step.status} key={step.step}>
+                <span aria-hidden="true">
+                  {step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '◌' : '·'}
+                </span>
+                {step.step}
+              </li>
+            ))}
+          </ol>
+        ) : null}
         {(!isCollapsible || expanded) && entry.detail ? (
           <code className="timeline-detail">{entry.detail}</code>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+function ExecutionState({
+  run,
+  currentActivity,
+  compact = false,
+}: {
+  run: RunSnapshot
+  currentActivity?: ActivityEntry
+  compact?: boolean
+}): React.JSX.Element {
+  const label = currentActivity?.title ?? STATUS_LABELS[run.run.status]
+  const detail = currentActivity?.detail ?? run.run.latestMessage ?? 'Agent 正在准备执行环境。'
+  return (
+    <div className={`execution-state ${compact ? 'compact' : ''}`} role="status" aria-live="polite">
+      <span className="execution-spinner" aria-hidden="true" />
+      <strong>{label}</strong>
+      <span>{detail}</span>
     </div>
   )
 }
@@ -660,58 +758,173 @@ function ViewButton({
 
 function buildTimeline(events: AgentEvent[]): TimelineEntry[] {
   const entries: TimelineEntry[] = []
+  const activityById = new Map<string, ActivityEntry>()
+
+  function ensureActivityGroup(event: AgentEvent): TimelineEntry {
+    const previous = entries[entries.length - 1]
+    if (previous?.kind === 'activityGroup') return previous
+    const group: TimelineEntry = {
+      id: event.id,
+      kind: 'activityGroup',
+      title: '活动',
+      timestamp: event.timestamp,
+      items: [],
+      status: 'running',
+    }
+    entries.push(group)
+    return group
+  }
+
+  function appendActivity(event: AgentEvent, mode: 'started' | 'output' | 'completed'): void {
+    const payload = event.payload
+    const itemId =
+      payloadString(payload, 'itemId') ??
+      `${payloadString(payload, 'command') ?? 'activity'}-${event.id}`
+    let item = activityById.get(itemId)
+    if (!item) {
+      const group = ensureActivityGroup(event)
+      item = {
+        id: itemId,
+        title: activityTitle(payload),
+        detail: payloadString(payload, 'command') ?? payloadString(payload, 'toolName'),
+        timestamp: event.timestamp,
+        status: mode === 'completed' ? activityStatus(payload) : 'running',
+      }
+      group.items?.push(item)
+      activityById.set(itemId, item)
+    }
+    item.timestamp = event.timestamp
+    if (mode === 'started') item.status = 'running'
+    if (mode === 'completed') item.status = activityStatus(payload)
+    const output = payloadString(payload, 'output')
+    if (output)
+      item.body = item.body
+        ? `${item.body}${item.body.endsWith('\n') ? '' : '\n'}${output}`
+        : output
+    const files = payloadStringArray(payload, 'files')
+    if (files.length > 0) item.body = `涉及 ${files.length} 个文件：${files.join('、')}`
+  }
+
+  function appendMessage(event: AgentEvent, message?: string): void {
+    if (!message) return
+    const previous = entries[entries.length - 1]
+    if (previous?.kind === 'message') {
+      previous.body = `${previous.body ?? ''}${message}`
+      previous.timestamp = event.timestamp
+      return
+    }
+    entries.push({
+      id: event.id,
+      kind: 'message',
+      title: 'ParaCode',
+      body: message,
+      timestamp: event.timestamp,
+    })
+  }
+
   for (const event of events) {
     const payload = event.payload
-    if (event.type === 'progress') {
-      const stream = payload.stream
-      if (stream === 'agent') {
-        const message = payloadString(payload, 'message') ?? payloadString(payload, 'delta')
-        if (!message) continue
-        const previous = entries[entries.length - 1]
-        if (previous?.kind === 'message') {
-          previous.body = `${previous.body ?? ''}${message}`
-          previous.timestamp = event.timestamp
-        } else {
-          entries.push({
-            id: event.id,
-            kind: 'message',
-            title: 'ParaCode',
-            body: message,
-            timestamp: event.timestamp,
-          })
-        }
-        continue
-      }
-      if (stream === 'tool') {
+    if (event.type === 'run_status_changed') {
+      const status = payloadString(payload, 'status')
+      if (status === 'creating' || status === 'bootstrapping') {
         entries.push({
           id: event.id,
-          kind: 'activity',
-          title: '命令输出',
-          body: payloadString(payload, 'output'),
-          detail: payloadString(payload, 'command'),
+          kind: 'system',
+          title: STATUS_LABELS[status],
+          body: payloadString(payload, 'message'),
           timestamp: event.timestamp,
           status: 'running',
         })
+      }
+      continue
+    }
+    if (event.type === 'reasoning') {
+      const message =
+        payloadString(payload, 'message') ??
+        payloadString(payload, 'summary') ??
+        payloadString(payload, 'delta')
+      const previous = entries[entries.length - 1]
+      if (previous?.kind === 'reasoning') {
+        previous.body = `${previous.body ?? ''}${previous.body ? '\n' : ''}${message ?? ''}`
+        previous.timestamp = event.timestamp
+      } else {
+        entries.push({
+          id: event.id,
+          kind: 'reasoning',
+          title: '分析摘要',
+          body: message,
+          timestamp: event.timestamp,
+          status: 'running',
+        })
+      }
+      continue
+    }
+    if (event.type === 'plan_updated') {
+      const previous = entries[entries.length - 1]
+      const plan = Array.isArray(payload.plan) ? payload.plan.filter(isPlanStep) : undefined
+      if (previous?.kind === 'plan') {
+        previous.body =
+          payloadString(payload, 'message') ??
+          payloadString(payload, 'explanation') ??
+          payloadString(payload, 'delta') ??
+          previous.body
+        previous.plan = plan ?? previous.plan
+        previous.timestamp = event.timestamp
+        previous.status = 'completed'
+      } else {
+        entries.push({
+          id: event.id,
+          kind: 'plan',
+          title: '执行计划',
+          body:
+            payloadString(payload, 'message') ??
+            payloadString(payload, 'explanation') ??
+            payloadString(payload, 'delta'),
+          plan,
+          timestamp: event.timestamp,
+          status: 'completed',
+        })
+      }
+      continue
+    }
+    if (event.type === 'assistant_message') {
+      appendMessage(event, payloadString(payload, 'message') ?? payloadString(payload, 'delta'))
+      continue
+    }
+    if (event.type === 'activity_started') {
+      appendActivity(event, 'started')
+      continue
+    }
+    if (event.type === 'activity_output') {
+      appendActivity(event, 'output')
+      continue
+    }
+    if (event.type === 'activity_completed') {
+      appendActivity(event, 'completed')
+      continue
+    }
+    if (event.type === 'progress') {
+      const stream = payload.stream
+      if (stream === 'agent') {
+        appendMessage(event, payloadString(payload, 'message') ?? payloadString(payload, 'delta'))
+        continue
+      }
+      if (stream === 'tool') {
+        appendActivity(event, 'output')
         continue
       }
       if (stream === 'plan') {
         entries.push({
           id: event.id,
-          kind: 'activity',
-          title: '方案更新',
+          kind: 'plan',
+          title: '执行计划',
           body: payloadString(payload, 'message'),
           timestamp: event.timestamp,
         })
         continue
       }
       if (stream === 'diff') {
-        entries.push({
-          id: event.id,
-          kind: 'activity',
-          title: '变更已更新',
-          body: 'Agent 正在汇总当前 worktree 的文件变更。',
-          timestamp: event.timestamp,
-        })
+        appendActivity(event, 'output')
         continue
       }
       if (stream === 'stderr') {
@@ -758,32 +971,11 @@ function buildTimeline(events: AgentEvent[]): TimelineEntry[] {
       continue
     }
     if (event.type === 'tool_started') {
-      const tool = payloadString(payload, 'tool')
-      entries.push({
-        id: event.id,
-        kind: 'activity',
-        title: tool === 'file_change' || tool === 'fileChange' ? '开始修改文件' : '开始执行命令',
-        detail: payloadString(payload, 'command'),
-        timestamp: event.timestamp,
-        status: 'running',
-      })
+      appendActivity(event, 'started')
       continue
     }
     if (event.type === 'tool_finished') {
-      const tool = payloadString(payload, 'tool')
-      const files = payloadStringArray(payload, 'files')
-      entries.push({
-        id: event.id,
-        kind: 'activity',
-        title: tool === 'file_change' || tool === 'fileChange' ? '文件修改完成' : '命令执行完成',
-        body:
-          files.length > 0
-            ? `涉及 ${files.length} 个文件：${files.join('、')}`
-            : payloadString(payload, 'output'),
-        detail: payloadString(payload, 'command'),
-        timestamp: event.timestamp,
-        status: payloadString(payload, 'status') === 'failed' ? 'failed' : 'completed',
-      })
+      appendActivity(event, 'completed')
       continue
     }
     if (event.type === 'test_result') {
@@ -858,6 +1050,28 @@ function buildTimeline(events: AgentEvent[]): TimelineEntry[] {
   return entries
 }
 
+function activityTitle(payload: AgentEventPayload): string {
+  const kind = payloadString(payload, 'activityKind') ?? payloadString(payload, 'itemType')
+  if (kind === 'command' || kind === 'commandExecution') return '运行命令'
+  if (kind === 'fileChange') return '编辑文件'
+  if (kind === 'mcpToolCall') return `调用 ${payloadString(payload, 'toolName') ?? 'MCP 工具'}`
+  if (kind === 'collabAgent') return '协作 Agent'
+  return '调用工具'
+}
+
+function activityStatus(payload: AgentEventPayload): ActivityEntry['status'] {
+  return payloadString(payload, 'status') === 'failed' ? 'failed' : 'completed'
+}
+
+function isPlanStep(value: unknown): value is PlanStep {
+  if (!value || typeof value !== 'object') return false
+  const step = value as Record<string, unknown>
+  return (
+    typeof step.step === 'string' &&
+    (step.status === 'pending' || step.status === 'inProgress' || step.status === 'completed')
+  )
+}
+
 function statusForEvent(
   type: AgentEvent['type'],
   payload: AgentEventPayload = {},
@@ -871,6 +1085,23 @@ function statusForEvent(
     session_failed: 'failed',
     session_canceled: 'canceled',
     session_paused: 'waiting_human',
+  }
+  if (type === 'run_status_changed') {
+    const status = payloadString(payload, 'status')
+    if (
+      status === 'creating' ||
+      status === 'bootstrapping' ||
+      status === 'planning' ||
+      status === 'coding' ||
+      status === 'waiting_human' ||
+      status === 'testing' ||
+      status === 'ready_for_review' ||
+      status === 'completed' ||
+      status === 'failed' ||
+      status === 'canceled'
+    ) {
+      return status
+    }
   }
   if (type === 'phase_changed') {
     const phase = payloadString(payload, 'phase')

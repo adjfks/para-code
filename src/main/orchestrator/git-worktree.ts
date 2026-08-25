@@ -9,12 +9,19 @@ import type { WorktreeManager, WorktreeMetadata } from './types'
 const execFileAsync = promisify(execFile)
 
 export class GitWorktreeManager implements WorktreeManager {
-  async create(input: StartTaskInput & { runId: string }): Promise<WorktreeMetadata> {
+  async validate(input: StartTaskInput): Promise<void> {
     const repositoryPath = await git(input.repositoryPath, ['rev-parse', '--show-toplevel'])
     const status = await git(repositoryPath, ['status', '--porcelain'])
     if (status.trim()) {
       throw new Error('主工作区不干净，请先提交或暂存当前修改后再创建执行环境。')
     }
+    const baseRef = input.baseRef ?? (await git(repositoryPath, ['branch', '--show-current']))
+    if (!baseRef.trim()) throw new Error('无法确定当前 Git 分支。')
+  }
+
+  async create(input: StartTaskInput & { runId: string }): Promise<WorktreeMetadata> {
+    const repositoryPath = await git(input.repositoryPath, ['rev-parse', '--show-toplevel'])
+    await this.validate(input)
 
     const baseRef = input.baseRef ?? (await git(repositoryPath, ['branch', '--show-current']))
     if (!baseRef.trim()) throw new Error('无法确定当前 Git 分支。')

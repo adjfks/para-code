@@ -8,6 +8,7 @@ export interface WorktreeMetadata {
 }
 
 export interface WorktreeManager {
+  validate?(input: StartTaskInput): Promise<void>
   create(input: StartTaskInput & { runId: string }): Promise<WorktreeMetadata>
 }
 

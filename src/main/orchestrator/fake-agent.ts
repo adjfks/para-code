@@ -46,65 +46,162 @@ export class FakeAgentProvider implements AgentProvider {
     emit: Parameters<AgentProvider['start']>[1],
     signal: AbortSignal,
   ): Promise<void> {
-    if (!(await pause(40, signal))) return
+    if (!(await pause(350, signal))) return
     emit({ agentSessionId, type: 'phase_changed', payload: { phase: 'planning' } })
-    if (!(await pause(40, signal))) return
+    if (!(await pause(300, signal))) return
     emit({
       agentSessionId,
-      type: 'progress',
+      type: 'reasoning',
       payload: {
-        stream: 'agent',
-        message: `我先检查项目结构和现有测试，再处理这个需求：${context.requirement}`,
+        summary: '正在分析项目结构和现有测试',
+        message: '正在分析项目结构和现有测试',
       },
     })
-    if (!(await pause(40, signal))) return
+    if (!(await pause(280, signal))) return
     emit({
       agentSessionId,
-      type: 'tool_started',
-      payload: { tool: 'command', command: 'pnpm test', status: 'running' },
-    })
-    if (!(await pause(40, signal))) return
-    emit({
-      agentSessionId,
-      type: 'progress',
-      payload: { stream: 'tool', command: 'pnpm test', output: '发现 12 个测试，正在运行…' },
-    })
-    if (!(await pause(40, signal))) return
-    emit({
-      agentSessionId,
-      type: 'tool_finished',
-      payload: { tool: 'command', command: 'pnpm test', status: 'completed', output: '12 passed' },
-    })
-    if (!(await pause(40, signal))) return
-    emit({ agentSessionId, type: 'phase_changed', payload: { phase: 'coding' } })
-    if (!(await pause(40, signal))) return
-    emit({
-      agentSessionId,
-      type: 'tool_finished',
+      type: 'reasoning',
       payload: {
-        tool: 'file_change',
+        summary: `正在确认需求影响范围：${context.requirement}`,
+        message: `正在确认需求影响范围：${context.requirement}`,
+      },
+    })
+    if (!(await pause(280, signal))) return
+    emit({
+      agentSessionId,
+      type: 'plan_updated',
+      payload: {
+        explanation: '已形成初步执行方案。',
+        plan: [
+          { step: '检查项目结构和现有测试', status: 'completed' },
+          { step: '实现需求并补充测试', status: 'inProgress' },
+          { step: '运行测试并总结变更', status: 'pending' },
+        ],
+      },
+    })
+    if (!(await pause(280, signal))) return
+    emit({
+      agentSessionId,
+      type: 'activity_started',
+      payload: {
+        itemId: 'fake-inspect',
+        itemType: 'commandExecution',
+        activityKind: 'command',
+        tool: 'commandExecution',
+        command: 'pnpm test',
+        status: 'running',
+      },
+    })
+    if (!(await pause(450, signal))) return
+    emit({
+      agentSessionId,
+      type: 'activity_output',
+      payload: {
+        itemId: 'fake-inspect',
+        activityKind: 'command',
+        command: 'pnpm test',
+        output: '发现 12 个测试，正在运行…',
+      },
+    })
+    if (!(await pause(450, signal))) return
+    emit({
+      agentSessionId,
+      type: 'activity_completed',
+      payload: {
+        itemId: 'fake-inspect',
+        activityKind: 'command',
+        tool: 'commandExecution',
+        command: 'pnpm test',
+        status: 'completed',
+        output: '12 passed',
+      },
+    })
+    if (!(await pause(350, signal))) return
+    emit({ agentSessionId, type: 'phase_changed', payload: { phase: 'coding' } })
+    if (!(await pause(500, signal))) return
+    emit({
+      agentSessionId,
+      type: 'activity_started',
+      payload: {
+        itemId: 'fake-file-change',
+        itemType: 'fileChange',
+        activityKind: 'fileChange',
+        tool: 'fileChange',
+        status: 'running',
+        files: ['src/example.ts', 'src/example.test.ts'],
+      },
+    })
+    if (!(await pause(600, signal))) return
+    emit({
+      agentSessionId,
+      type: 'activity_completed',
+      payload: {
+        itemId: 'fake-file-change',
+        activityKind: 'fileChange',
+        tool: 'fileChange',
         status: 'completed',
         files: ['src/example.ts', 'src/example.test.ts'],
       },
     })
-    if (!(await pause(40, signal))) return
+    if (!(await pause(350, signal))) return
     emit({
       agentSessionId,
-      type: 'progress',
+      type: 'assistant_message',
+      payload: { message: '实现已经完成，我补充了测试并准备做最后一次验证。' },
+    })
+    if (!(await pause(300, signal))) return
+    emit({ agentSessionId, type: 'phase_changed', payload: { phase: 'testing' } })
+    if (!(await pause(350, signal))) return
+    emit({
+      agentSessionId,
+      type: 'activity_started',
       payload: {
-        stream: 'agent',
-        message: '实现已经完成，我补充了测试并准备做最后一次验证。',
+        itemId: 'fake-final-test',
+        activityKind: 'command',
+        tool: 'commandExecution',
+        command: 'pnpm test',
+        status: 'running',
       },
     })
-    if (!(await pause(40, signal))) return
-    emit({ agentSessionId, type: 'phase_changed', payload: { phase: 'testing' } })
-    if (!(await pause(40, signal))) return
+    if (!(await pause(650, signal))) return
+    emit({
+      agentSessionId,
+      type: 'activity_completed',
+      payload: {
+        itemId: 'fake-final-test',
+        activityKind: 'command',
+        tool: 'commandExecution',
+        command: 'pnpm test',
+        status: 'completed',
+        output: '12 passed',
+      },
+    })
+    if (!(await pause(350, signal))) return
     emit({
       agentSessionId,
       type: 'test_result',
       payload: { status: 'passed', command: 'pnpm test', output: '12 passed' },
     })
-    if (!(await pause(40, signal))) return
+    if (!(await pause(300, signal))) return
+    emit({
+      agentSessionId,
+      type: 'plan_updated',
+      payload: {
+        explanation: '所有计划步骤已完成。',
+        plan: [
+          { step: '检查项目结构和现有测试', status: 'completed' },
+          { step: '实现需求并补充测试', status: 'completed' },
+          { step: '运行测试并总结变更', status: 'completed' },
+        ],
+      },
+    })
+    if (!(await pause(250, signal))) return
+    emit({
+      agentSessionId,
+      type: 'assistant_message',
+      payload: { message: '验证已通过，worktree 中的修改已经准备好供你查看。' },
+    })
+    if (!(await pause(250, signal))) return
     emit({
       agentSessionId,
       type: 'session_completed',

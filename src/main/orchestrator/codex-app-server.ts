@@ -102,6 +102,7 @@ export class CodexAppServerProvider implements AgentProvider {
       const turn = await client.request('turn/start', {
         threadId,
         cwd: context.worktreePath,
+        summary: 'detailed',
         input: [
           {
             type: 'text',
@@ -307,37 +308,91 @@ function mapCodexNotification(
     const delta = asString(payload.delta) ?? asString(payload.text)
     return {
       agentSessionId,
-      type: 'progress',
-      payload: { ...commonPayload, stream: 'agent', ...(delta ? { delta, message: delta } : {}) },
+      type: 'assistant_message',
+      payload: { ...commonPayload, ...(delta ? { delta, message: delta } : {}) },
     }
   }
   if (method === 'item/commandExecution/outputDelta') {
     const delta = asString(payload.delta) ?? asString(payload.output)
     return {
       agentSessionId,
-      type: 'progress',
-      payload: { ...commonPayload, stream: 'tool', ...(delta ? { output: delta } : {}) },
+      type: 'activity_output',
+      payload: { ...commonPayload, activityKind: 'command', ...(delta ? { output: delta } : {}) },
+    }
+  }
+  if (method === 'item/fileChange/outputDelta' || method === 'item/fileChange/patchUpdated') {
+    const delta = asString(payload.delta) ?? asString(payload.output)
+    return {
+      agentSessionId,
+      type: 'activity_output',
+      payload: {
+        ...commonPayload,
+        activityKind: 'fileChange',
+        ...(delta ? { output: delta } : {}),
+      },
+    }
+  }
+  if (method === 'item/mcpToolCall/progress') {
+    const delta = asString(payload.message) ?? asString(payload.output) ?? asString(payload.delta)
+    return {
+      agentSessionId,
+      type: 'activity_output',
+      payload: {
+        ...commonPayload,
+        activityKind: 'mcpToolCall',
+        ...(delta ? { output: delta } : {}),
+      },
+    }
+  }
+  if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
+    const delta = asString(payload.delta)
+    return {
+      agentSessionId,
+      type: 'reasoning',
+      payload: { ...commonPayload, ...(delta ? { delta, message: delta, summary: delta } : {}) },
+    }
+  }
+  if (method === 'item/reasoning/summaryPartAdded') {
+    return {
+      agentSessionId,
+      type: 'reasoning',
+      payload: { ...commonPayload, message: '分析摘要已更新。' },
+    }
+  }
+  if (method === 'item/plan/delta') {
+    const delta = asString(payload.delta)
+    return {
+      agentSessionId,
+      type: 'plan_updated',
+      payload: { ...commonPayload, ...(delta ? { delta, message: delta } : {}) },
     }
   }
   if (method === 'turn/plan/updated') {
     return {
       agentSessionId,
-      type: 'progress',
-      payload: { ...commonPayload, stream: 'plan', message: asString(payload.explanation) },
+      type: 'plan_updated',
+      payload: {
+        ...commonPayload,
+        message: asString(payload.explanation),
+        plan: Array.isArray(payload.plan) ? payload.plan : undefined,
+      },
     }
   }
   if (method === 'turn/diff/updated') {
     return { agentSessionId, type: 'progress', payload: { ...commonPayload, stream: 'diff' } }
   }
   if (method === 'item/started') {
-    if (itemType === 'commandExecution' || itemType === 'fileChange') {
+    if (isActivityItem(itemType)) {
       return {
         agentSessionId,
-        type: 'tool_started',
+        type: 'activity_started',
         payload: {
           ...commonPayload,
+          activityKind: activityKindForItem(itemType),
           tool: itemType,
           command: asString(item?.command),
+          server: asString(item?.server),
+          toolName: asString(item?.tool),
           status: asString(item?.status) ?? 'running',
         },
       }
@@ -345,14 +400,17 @@ function mapCodexNotification(
     return { agentSessionId, type: 'progress', payload: { ...commonPayload, stream: 'system' } }
   }
   if (method === 'item/completed') {
-    if (itemType === 'commandExecution' || itemType === 'fileChange') {
+    if (isActivityItem(itemType)) {
       return {
         agentSessionId,
-        type: 'tool_finished',
+        type: 'activity_completed',
         payload: {
           ...commonPayload,
+          activityKind: activityKindForItem(itemType),
           tool: itemType,
           command: asString(item?.command),
+          server: asString(item?.server),
+          toolName: asString(item?.tool),
           status: asString(item?.status) ?? 'completed',
           output: asString(item?.aggregatedOutput),
         },
@@ -380,6 +438,27 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
+}
+
+function isActivityItem(itemType: string | undefined): boolean {
+  return Boolean(
+    itemType &&
+    [
+      'commandExecution',
+      'fileChange',
+      'mcpToolCall',
+      'dynamicToolCall',
+      'collabAgentToolCall',
+    ].includes(itemType),
+  )
+}
+
+function activityKindForItem(itemType: string | undefined): string {
+  if (itemType === 'commandExecution') return 'command'
+  if (itemType === 'fileChange') return 'fileChange'
+  if (itemType === 'mcpToolCall') return 'mcpToolCall'
+  if (itemType === 'collabAgentToolCall') return 'collabAgent'
+  return 'tool'
 }
 
 function readString(value: unknown, key: string): string {

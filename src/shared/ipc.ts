@@ -36,7 +36,14 @@ export type RunStatus =
 
 export type AgentEventType =
   | 'session_started'
+  | 'run_status_changed'
   | 'phase_changed'
+  | 'reasoning'
+  | 'plan_updated'
+  | 'assistant_message'
+  | 'activity_started'
+  | 'activity_output'
+  | 'activity_completed'
   | 'progress'
   | 'tool_started'
   | 'tool_finished'
@@ -86,6 +93,9 @@ export interface AgentEventPayload extends Record<string, unknown> {
   message?: string
   delta?: string
   stream?: 'agent' | 'tool' | 'plan' | 'diff' | 'stderr' | 'system'
+  activityKind?: string
+  summary?: string
+  plan?: Array<{ step: string; status: 'pending' | 'inProgress' | 'completed' }>
   itemId?: string
   itemType?: string
   turnId?: string
@@ -94,6 +104,9 @@ export interface AgentEventPayload extends Record<string, unknown> {
   cwd?: string
   output?: string
   path?: string
+  worktreePath?: string
+  branchName?: string
+  baseRef?: string
   files?: string[]
   status?: string
 }
