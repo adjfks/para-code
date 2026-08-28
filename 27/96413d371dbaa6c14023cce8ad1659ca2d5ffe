@@ -1,0 +1,33 @@
+src/main/providers/openai-compatible.ts
+  s_afba13fda2b211::t_59b12096f97dfb 14-16
+  s_afba13fda2b211::t_1c9f2b179943a0 1-13,17-51
+src/main/providers/provider-store.test.ts
+  s_afba13fda2b211::t_2610e11b3053e9 35-136
+  s_afba13fda2b211::t_8749fcec8866db 13-14
+src/main/providers/provider-store.ts
+  s_afba13fda2b211::t_1c9f2b179943a0 1-30,32-47,49,54-188,190-207,209-218,220-257,259-268,270-273
+  s_afba13fda2b211::t_2610e11b3053e9 50-53,189
+  s_afba13fda2b211::t_5d0ee2004f1bca 219,258
+  s_afba13fda2b211::t_f02e1b3f8f0b4e 269
+src/main/ipc.ts
+  s_afba13fda2b211::t_2610e11b3053e9 103-113
+src/renderer/src/App.tsx
+  s_afba13fda2b211::t_2610e11b3053e9 818-871,928-930,1059-1063,1076-1081,1085-1091,1095-1100,1106-1111,1114-1119,1133-1136,1145-1149,1155-1159,1163-1167,1170-1174
+  s_afba13fda2b211::t_9df73d2b25ab9c 911-927,931-1025,1033-1035,1037-1058,1064-1075,1082-1084,1092-1094,1101-1105,1112-1113,1120-1132,1137-1144,1150-1154,1160-1162,1168-1169,1175-1185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "2796413d371dbaa6c14023cce8ad1659ca2d5ffe",
+  "prompts": {},
+  "sessions": {
+    "s_afba13fda2b211": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0380e-2824-7051-9862-9a4a2be2edb9",
+        "model": "glm-5.3"
+      },
+      "human_author": "ptsu <ptsu@trip.com>"
+    }
+  }
+}
