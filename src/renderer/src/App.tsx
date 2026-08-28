@@ -4,12 +4,15 @@ import type {
   AgentEvent,
   AgentEventPayload,
   AppInfo,
+  ProviderSummary,
   RunSnapshot,
   RunStatus,
+  ProviderConfigInput,
+  ProviderTestResult,
 } from '../../shared/ipc'
 
 type LoadState = 'loading' | 'ready' | 'error'
-type View = 'session' | 'board' | 'queue'
+type View = 'session' | 'board' | 'queue' | 'settings'
 type TimelineKind =
   'message' | 'reasoning' | 'plan' | 'activityGroup' | 'test' | 'attention' | 'system'
 
@@ -69,6 +72,9 @@ function App(): React.JSX.Element {
   const [activeView, setActiveView] = useState<View>('session')
   const [actionState, setActionState] = useState<'idle' | 'starting' | 'stopping' | 'error'>('idle')
   const [errorMessage, setErrorMessage] = useState<string>()
+  const [providers, setProviders] = useState<ProviderSummary[]>([])
+  const [selectedProviderId, setSelectedProviderId] = useState<string>()
+  const [selectedModel, setSelectedModel] = useState<string>()
 
   useEffect(() => {
     window.paracode
@@ -78,6 +84,18 @@ function App(): React.JSX.Element {
         setLoadState('ready')
       })
       .catch(() => setLoadState('error'))
+  }, [])
+
+  useEffect(() => {
+    window.paracode
+      .listProviders()
+      .then((items) => {
+        setProviders(items)
+        const selected = items.find((item) => item.isDefault) ?? items[0]
+        setSelectedProviderId((current) => current ?? selected?.id)
+        setSelectedModel((current) => current ?? selected?.model)
+      })
+      .catch(() => undefined)
   }, [])
 
   useEffect(
@@ -145,6 +163,8 @@ function App(): React.JSX.Element {
       const snapshot = await window.paracode.startTask({
         repositoryPath,
         requirement: requirement.trim(),
+        providerId: selectedProviderId,
+        model: selectedModel,
       })
       setRun(snapshot)
       setEvents((current) => mergeEvents(snapshot.events, current))
@@ -181,6 +201,14 @@ function App(): React.JSX.Element {
     setErrorMessage(undefined)
     setActionState('idle')
     setActiveView('session')
+  }
+
+  function refreshProviders(nextProviders: ProviderSummary[]): void {
+    setProviders(nextProviders)
+    const current = nextProviders.find((item) => item.id === selectedProviderId)
+    const next = current ?? nextProviders.find((item) => item.isDefault) ?? nextProviders[0]
+    setSelectedProviderId(next?.id)
+    setSelectedModel((model) => (current ? model : next?.model))
   }
 
   return (
@@ -252,16 +280,26 @@ function App(): React.JSX.Element {
         </div>
 
         <div className="sidebar-footer">
-          <span className={`status-dot ${loadState}`} aria-hidden="true" />
-          <span>
-            {loadState === 'error'
-              ? '桌面服务异常'
-              : loadState === 'loading'
-                ? '正在连接本地服务'
-                : appInfo
-                  ? `本地服务已连接 · ${appInfo.version}`
-                  : '本地服务已连接'}
-          </span>
+          <button
+            className={`settings-entry ${activeView === 'settings' ? 'active' : ''}`}
+            type="button"
+            onClick={() => setActiveView('settings')}
+          >
+            <span aria-hidden="true">⚙</span>
+            <span>设置</span>
+          </button>
+          <div className="sidebar-status">
+            <span className={`status-dot ${loadState}`} aria-hidden="true" />
+            <span>
+              {loadState === 'error'
+                ? '桌面服务异常'
+                : loadState === 'loading'
+                  ? '正在连接本地服务'
+                  : appInfo
+                    ? `本地服务已连接 · ${appInfo.version}`
+                    : '本地服务已连接'}
+            </span>
+          </div>
         </div>
       </aside>
 
@@ -313,6 +351,14 @@ function App(): React.JSX.Element {
             onSelectProject={() => void selectProject()}
             onStartTask={() => void startTask()}
             onStopTask={() => void stopTask()}
+            providers={providers}
+            selectedProviderId={selectedProviderId}
+            selectedModel={selectedModel}
+            onModelChange={(providerId, model) => {
+              setSelectedProviderId(providerId)
+              setSelectedModel(model)
+            }}
+            onOpenSettings={() => setActiveView('settings')}
           />
         ) : null}
         {activeView === 'board' ? (
@@ -320,6 +366,13 @@ function App(): React.JSX.Element {
         ) : null}
         {activeView === 'queue' ? (
           <QueueView events={events} onOpenSession={() => setActiveView('session')} />
+        ) : null}
+        {activeView === 'settings' ? (
+          <SettingsView
+            providers={providers}
+            onProvidersChange={refreshProviders}
+            onOpenSession={() => setActiveView('session')}
+          />
         ) : null}
       </main>
     </div>
@@ -339,6 +392,11 @@ function SessionView({
   onSelectProject,
   onStartTask,
   onStopTask,
+  providers,
+  selectedProviderId,
+  selectedModel,
+  onModelChange,
+  onOpenSettings,
 }: {
   projectName: string
   repositoryPath?: string
@@ -352,6 +410,11 @@ function SessionView({
   onSelectProject: () => void
   onStartTask: () => void
   onStopTask: () => void
+  providers: ProviderSummary[]
+  selectedProviderId?: string
+  selectedModel?: string
+  onModelChange: (providerId: string, model: string) => void
+  onOpenSettings: () => void
 }): React.JSX.Element {
   const canStart =
     Boolean(repositoryPath && requirement.trim()) &&
@@ -440,6 +503,13 @@ function SessionView({
                 <span aria-hidden="true">□</span>
                 {repositoryPath ? projectName : '选择 Git 项目'}
               </button>
+              <ModelPicker
+                providers={providers}
+                selectedProviderId={selectedProviderId}
+                selectedModel={selectedModel}
+                onChange={onModelChange}
+                onOpenSettings={onOpenSettings}
+              />
               <span className="composer-chip readonly">工作区写入</span>
             </div>
             {isRunning ? (
@@ -726,6 +796,393 @@ function EmptyState({ title, body }: { title: string; body: string }): React.JSX
       <h2>{title}</h2>
       <p>{body}</p>
     </div>
+  )
+}
+
+function ModelPicker({
+  providers,
+  selectedProviderId,
+  selectedModel,
+  onChange,
+  onOpenSettings,
+}: {
+  providers: ProviderSummary[]
+  selectedProviderId?: string
+  selectedModel?: string
+  onChange: (providerId: string, model: string) => void
+  onOpenSettings: () => void
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId)
+  const modelEntries = providers.flatMap((provider) =>
+    provider.models.map((model) => ({
+      providerId: provider.id,
+      providerName: provider.name,
+      model,
+    })),
+  )
+  const activeIndex = modelEntries.findIndex(
+    (entry) => entry.providerId === selectedProviderId && entry.model === selectedModel,
+  )
+
+  function moveSelection(offset: number): void {
+    if (modelEntries.length === 0) return
+    const nextIndex =
+      activeIndex === -1 ? 0 : Math.min(modelEntries.length - 1, Math.max(0, activeIndex + offset))
+    const next = modelEntries[nextIndex]
+    onChange(next.providerId, next.model)
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>): void {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      moveSelection(1)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      moveSelection(-1)
+    } else if (event.key === 'Enter' || event.key === 'Escape') {
+      event.preventDefault()
+      setOpen(false)
+    }
+  }
+
+  if (!providers.length) {
+    return (
+      <button className="composer-chip" type="button" onClick={onOpenSettings}>
+        <span aria-hidden="true">◇</span>
+        添加 Provider
+      </button>
+    )
+  }
+
+  return (
+    <div className="model-picker">
+      <button
+        className="composer-chip"
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={handleKeyDown}
+      >
+        <span aria-hidden="true">◇</span>
+        {selectedProvider
+          ? `${selectedProvider.name} · ${selectedModel ?? selectedProvider.model}`
+          : '选择模型'}
+      </button>
+      {open ? (
+        <div className="model-popover" role="dialog" aria-label="选择模型">
+          <div className="model-popover-head">
+            <strong>选择模型</strong>
+            <button type="button" onClick={onOpenSettings}>
+              管理 Provider
+            </button>
+          </div>
+          {selectedProvider?.connectionStatus === 'failed' ? (
+            <p className="model-warning">当前 Provider 上次连接失败，请到设置中重新测试。</p>
+          ) : null}
+          {providers.map((provider) => (
+            <section key={provider.id}>
+              <p className="model-group-label">{provider.name}</p>
+              <div className="model-options">
+                {provider.models.map((model) => {
+                  const selected = provider.id === selectedProviderId && model === selectedModel
+                  return (
+                    <button
+                      className={`model-option ${selected ? 'selected' : ''}`}
+                      type="button"
+                      key={`${provider.id}:${model}`}
+                      onClick={() => {
+                        onChange(provider.id, model)
+                        setOpen(false)
+                      }}
+                    >
+                      <span>{model}</span>
+                      {selected ? <span aria-hidden="true">✓</span> : null}
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function SettingsView({
+  providers,
+  onProvidersChange,
+  onOpenSession,
+}: {
+  providers: ProviderSummary[]
+  onProvidersChange: (providers: ProviderSummary[]) => void
+  onOpenSession: () => void
+}): React.JSX.Element {
+  const [editingId, setEditingId] = useState<string>()
+  const [name, setName] = useState('')
+  const [baseURL, setBaseURL] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [model, setModel] = useState('')
+  const [formState, setFormState] = useState<'idle' | 'saving' | 'testing' | 'loadingModels'>(
+    'idle',
+  )
+  const [notice, setNotice] = useState<string>()
+  const [error, setError] = useState<string>()
+
+  const editing = providers.find((provider) => provider.id === editingId)
+
+  function fillForm(provider?: ProviderSummary): void {
+    setEditingId(provider?.id)
+    setName(provider?.name ?? '')
+    setBaseURL(provider?.baseURL ?? '')
+    setApiKey('')
+    setModel(provider?.model ?? '')
+    setNotice(undefined)
+    setError(undefined)
+  }
+
+  async function submit(): Promise<void> {
+    if (formState !== 'idle') return
+    setFormState('saving')
+    setError(undefined)
+    setNotice(undefined)
+    const input: ProviderConfigInput = { name, baseURL, apiKey: apiKey || undefined, model }
+    try {
+      const nextProviders = editingId
+        ? await window.paracode.updateProvider(editingId, input)
+        : await window.paracode.createProvider(input)
+      onProvidersChange(nextProviders)
+      const saved = editingId
+        ? nextProviders.find((provider) => provider.id === editingId)
+        : nextProviders.at(-1)
+      fillForm(saved)
+      setNotice('Provider 已保存。')
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '保存 Provider 失败。')
+    } finally {
+      setFormState('idle')
+    }
+  }
+
+  async function test(): Promise<void> {
+    if (!editingId || formState !== 'idle') return
+    setFormState('testing')
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const result: ProviderTestResult = await window.paracode.testProvider(editingId)
+      onProvidersChange(await window.paracode.listProviders())
+      setNotice(result.message)
+      if (!result.ok) setError(result.message)
+    } catch (testError) {
+      setError(testError instanceof Error ? testError.message : '测试连接失败。')
+    } finally {
+      setFormState('idle')
+    }
+  }
+
+  async function loadModels(): Promise<void> {
+    if (!editingId || formState !== 'idle') return
+    setFormState('loadingModels')
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const models = await window.paracode.listProviderModels(editingId)
+      const nextProviders = await window.paracode.listProviders()
+      onProvidersChange(nextProviders)
+      const saved = nextProviders.find((provider) => provider.id === editingId)
+      fillForm(saved)
+      setModel(models[0] ?? saved?.model ?? model)
+      setNotice(`已获取 ${models.length} 个模型。`)
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '获取模型列表失败。')
+    } finally {
+      setFormState('idle')
+    }
+  }
+
+  async function setDefault(id: string): Promise<void> {
+    try {
+      onProvidersChange(await window.paracode.setDefaultProvider(id))
+      setNotice('默认 Provider 已更新。')
+    } catch (defaultError) {
+      setError(defaultError instanceof Error ? defaultError.message : '设置默认 Provider 失败。')
+    }
+  }
+
+  async function remove(id: string): Promise<void> {
+    try {
+      onProvidersChange(await window.paracode.deleteProvider(id))
+      if (editingId === id) fillForm(undefined)
+      setNotice('Provider 已删除。')
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除 Provider 失败。')
+    }
+  }
+
+  return (
+    <section className="settings-layout" aria-label="设置">
+      <aside className="settings-nav" aria-label="设置导航">
+        <p className="settings-nav-label">设置</p>
+        <button className="settings-nav-item active" type="button">
+          AI提供商
+        </button>
+      </aside>
+      <div className="settings-scroll">
+        <header className="session-header">
+          <div>
+            <p className="eyebrow">SETTINGS</p>
+            <h1>模型服务配置</h1>
+            <p className="settings-description">
+              配置 OpenAI 协议兼容服务。API Key 只保存在主进程，界面仅显示脱敏信息。
+            </p>
+          </div>
+          <button className="secondary-button" type="button" onClick={onOpenSession}>
+            返回会话
+          </button>
+        </header>
+
+        {notice ? <p className="settings-notice">{notice}</p> : null}
+        {error ? <p className="error-message">{error}</p> : null}
+
+        <div className="provider-grid">
+          <form
+            className="provider-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submit()
+            }}
+          >
+            <h2>Provider 信息</h2>
+            <p>
+              {editing
+                ? '编辑时 API Key 留空，表示继续使用已保存的 Key。'
+                : '添加一个新的 OpenAI Compatible 服务。'}
+            </p>
+            <label>
+              名称
+              <input value={name} onChange={(event) => setName(event.target.value)} required />
+            </label>
+            <label>
+              协议
+              <select disabled>
+                <option>OpenAI Compatible</option>
+              </select>
+            </label>
+            <label>
+              Base URL
+              <input
+                value={baseURL}
+                onChange={(event) => setBaseURL(event.target.value)}
+                required
+                placeholder="https://api.example.com/v1"
+              />
+            </label>
+            <label>
+              API Key
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder={editing ? '留空表示不修改' : 'sk-...'}
+              />
+            </label>
+            <label>
+              默认模型
+              <input
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                required
+                placeholder="选择或输入模型 ID"
+              />
+            </label>
+            <div className="provider-actions">
+              <button className="send-button" type="submit" disabled={formState !== 'idle'}>
+                {formState === 'saving' ? '保存中…' : '保存'}
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={!editingId || formState !== 'idle'}
+                onClick={() => void test()}
+              >
+                {formState === 'testing' ? '测试中…' : '测试连接'}
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={!editingId || formState !== 'idle'}
+                onClick={() => void loadModels()}
+              >
+                {formState === 'loadingModels' ? '获取中…' : '刷新模型'}
+              </button>
+            </div>
+          </form>
+
+          <section className="provider-list-panel">
+            <h2>已配置服务</h2>
+            <p>选择一个服务作为新任务的默认模型来源。</p>
+            {providers.length === 0 ? (
+              <p className="provider-empty">还没有配置 Provider。</p>
+            ) : (
+              <div className="provider-list">
+                {providers.map((provider) => (
+                  <article
+                    className={`provider-card ${provider.id === editingId ? 'active' : ''}`}
+                    key={provider.id}
+                  >
+                    <div>
+                      <strong>{provider.name}</strong>
+                      <small>
+                        {provider.model} · {provider.apiKeyMasked}
+                      </small>
+                      <div className="provider-badges">
+                        {provider.isDefault ? <span className="provider-badge">默认</span> : null}
+                        <span className={`provider-badge ${provider.connectionStatus}`}>
+                          {provider.connectionStatus === 'ok'
+                            ? '已连接'
+                            : provider.connectionStatus === 'failed'
+                              ? '连接失败'
+                              : '未验证'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="provider-card-actions">
+                      {provider.isDefault ? null : (
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => void setDefault(provider.id)}
+                        >
+                          设默认
+                        </button>
+                      )}
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => fillForm(provider)}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => void remove(provider.id)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    </section>
   )
 }
 

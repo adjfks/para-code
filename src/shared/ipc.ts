@@ -4,6 +4,13 @@ export const IPC_CHANNELS = {
   startTask: 'run:start-task',
   stopTask: 'run:stop-task',
   runEvent: 'run:event',
+  providerList: 'provider:list',
+  providerCreate: 'provider:create',
+  providerUpdate: 'provider:update',
+  providerDelete: 'provider:delete',
+  providerSetDefault: 'provider:set-default',
+  providerTest: 'provider:test',
+  providerListModels: 'provider:list-models',
 } as const
 
 export interface AppInfo {
@@ -19,6 +26,44 @@ export interface ParaCodeApi {
   startTask: (input: StartTaskInput) => Promise<RunSnapshot>
   stopTask: (runId: string) => Promise<RunSnapshot>
   onRunEvent: (listener: (event: AgentEvent) => void) => () => void
+  listProviders: () => Promise<ProviderSummary[]>
+  createProvider: (input: ProviderConfigInput) => Promise<ProviderSummary[]>
+  updateProvider: (id: string, input: ProviderConfigInput) => Promise<ProviderSummary[]>
+  deleteProvider: (id: string) => Promise<ProviderSummary[]>
+  setDefaultProvider: (id: string) => Promise<ProviderSummary[]>
+  testProvider: (id: string) => Promise<ProviderTestResult>
+  listProviderModels: (id: string) => Promise<string[]>
+}
+
+export type ProviderSdkType = 'openai-compatible'
+export type ProviderConnectionStatus = 'unknown' | 'ok' | 'failed'
+
+export interface ProviderConfigInput {
+  name: string
+  baseURL: string
+  apiKey?: string
+  model: string
+}
+
+export interface ProviderSummary {
+  id: string
+  name: string
+  sdkType: ProviderSdkType
+  baseURL: string
+  model: string
+  apiKeyMasked?: string
+  models: string[]
+  isDefault: boolean
+  connectionStatus: ProviderConnectionStatus
+  lastValidatedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProviderTestResult {
+  ok: boolean
+  message: string
+  models?: string[]
 }
 
 export type RunStatus =
@@ -61,6 +106,8 @@ export interface StartTaskInput {
   repositoryPath: string
   requirement: string
   baseRef?: string
+  providerId?: string
+  model?: string
 }
 
 export interface WorktreeRun {

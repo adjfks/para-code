@@ -17,6 +17,13 @@ const api: ParaCodeApi = {
     ipcRenderer.on(IPC_CHANNELS.runEvent, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.runEvent, handler)
   },
+  listProviders: () => ipcRenderer.invoke(IPC_CHANNELS.providerList),
+  createProvider: (input) => ipcRenderer.invoke(IPC_CHANNELS.providerCreate, input),
+  updateProvider: (id, input) => ipcRenderer.invoke(IPC_CHANNELS.providerUpdate, id, input),
+  deleteProvider: (id) => ipcRenderer.invoke(IPC_CHANNELS.providerDelete, id),
+  setDefaultProvider: (id) => ipcRenderer.invoke(IPC_CHANNELS.providerSetDefault, id),
+  testProvider: (id) => ipcRenderer.invoke(IPC_CHANNELS.providerTest, id),
+  listProviderModels: (id) => ipcRenderer.invoke(IPC_CHANNELS.providerListModels, id),
 }
 
 if (process.contextIsolated) {
