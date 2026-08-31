@@ -30,12 +30,15 @@ export interface AgentProvider {
 export interface RunRepository {
   save(snapshot: RunSnapshot): Promise<void>
   get(runId: string): Promise<RunSnapshot | undefined>
+  listRuns(): Promise<WorktreeRun[]>
+  appendEvent(runId: string, event: AgentEvent): Promise<RunSnapshot | undefined>
 }
 
 export interface Orchestrator {
   startTask(input: StartTaskInput): Promise<RunSnapshot>
   stopTask(runId: string): Promise<RunSnapshot>
   getRun(runId: string): Promise<RunSnapshot | undefined>
+  listRuns(): Promise<WorktreeRun[]>
   onEvent(listener: (event: AgentEvent) => void): () => void
 }
 

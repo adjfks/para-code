@@ -8,6 +8,8 @@ export const IPC_CHANNELS = {
   projectRemove: 'project:remove',
   startTask: 'run:start-task',
   stopTask: 'run:stop-task',
+  runList: 'run:list',
+  runGet: 'run:get',
   runEvent: 'run:event',
   providerList: 'provider:list',
   providerCreate: 'provider:create',
@@ -49,6 +51,8 @@ export interface ParaCodeApi {
   removeProject: (id: string) => Promise<ProjectSummary[]>
   startTask: (input: StartTaskInput) => Promise<RunSnapshot>
   stopTask: (runId: string) => Promise<RunSnapshot>
+  listRuns: () => Promise<WorktreeRun[]>
+  getRun: (runId: string) => Promise<RunSnapshot>
   onRunEvent: (listener: (event: AgentEvent) => void) => () => void
   listProviders: () => Promise<ProviderSummary[]>
   createProvider: (input: ProviderConfigInput) => Promise<ProviderSummary[]>

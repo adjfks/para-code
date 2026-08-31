@@ -1,5 +1,4 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
-
 import path from 'node:path'
 
 import {
@@ -13,30 +12,36 @@ import {
 } from '../shared/ipc'
 import { CodexAppServerProvider } from './orchestrator/codex-app-server'
 import { DefaultOrchestrator } from './orchestrator/orchestrator'
+import { SqliteRunRepository } from './orchestrator/sqlite-run-repository'
 import { FakeAgentProvider } from './orchestrator/fake-agent'
 import { GitWorktreeManager } from './orchestrator/git-worktree'
-import { MemoryRunRepository } from './orchestrator/memory-repository'
+import { ParaCodeDatabase } from './database/database'
 import { ProjectService } from './projects/project-service'
 import { ProjectStore } from './projects/project-store'
 import { listOpenAICompatibleModels } from './providers/openai-compatible'
 import { ProviderStore } from './providers/provider-store'
 
-const runRepository = new MemoryRunRepository()
+const userDataPath = app.getPath('userData')
+const database = await ParaCodeDatabase.open(path.join(userDataPath, 'paracode.db'))
+const runRepository = new SqliteRunRepository(database)
 const agentProvider =
   process.env.PARACODE_AGENT_PROVIDER === 'codex'
     ? new CodexAppServerProvider()
     : new FakeAgentProvider()
 const orchestrator = new DefaultOrchestrator(new GitWorktreeManager(), agentProvider, runRepository)
 const providerStore = new ProviderStore(
-  path.join(app.getPath('userData'), 'providers.json'),
-  path.join(app.getPath('userData'), 'providers.secrets.json'),
+  path.join(userDataPath, 'providers.json'),
+  path.join(userDataPath, 'providers.secrets.json'),
 )
 const projectStore = new ProjectStore(
-  path.join(app.getPath('userData'), 'projects.json'),
+  path.join(userDataPath, 'projects.json'),
   new ProjectService(),
 )
 
 export function registerIpcHandlers(): void {
+  void markInterruptedRuns().catch((error) => {
+    console.error('恢复中断任务失败：', error)
+  })
   void providerStore.load()
   void projectStore.load().catch((error) => {
     console.error('加载项目配置失败：', error)
@@ -82,6 +87,14 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.stopTask, async (_event, runId: string) => {
     return orchestrator.stopTask(runId)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.runList, async () => orchestrator.listRuns())
+
+  ipcMain.handle(IPC_CHANNELS.runGet, async (_event, runId: string) => {
+    const snapshot = await orchestrator.getRun(runId)
+    if (!snapshot) throw new Error(`运行记录不存在：${runId}`)
+    return snapshot
   })
 
   orchestrator.onEvent((event) => {
@@ -149,5 +162,31 @@ function validateTaskProvider(input: StartTaskInput): void {
   if (!provider) throw new Error('所选 AI Provider 不存在。')
   if (!provider.models.includes(input.model)) {
     throw new Error('所选模型不存在，请刷新 Provider 模型列表。')
+  }
+}
+
+async function markInterruptedRuns(): Promise<void> {
+  const runs = await runRepository.listRuns()
+  const activeRuns = runs.filter(
+    (run) =>
+      run.status === 'creating' ||
+      run.status === 'bootstrapping' ||
+      run.status === 'planning' ||
+      run.status === 'coding' ||
+      run.status === 'testing' ||
+      run.status === 'waiting_human',
+  )
+  const message = '应用重启导致任务中断，worktree 修改已保留。'
+  for (const run of activeRuns) {
+    const event = await runRepository.appendRecoveryEvent(run, message)
+    await runRepository.save({
+      run: {
+        ...run,
+        status: 'failed',
+        latestMessage: message,
+        updatedAt: event?.timestamp ?? new Date().toISOString(),
+      },
+      events: [],
+    })
   }
 }

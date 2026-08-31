@@ -1,4 +1,5 @@
 import type { AgentEvent, RunSnapshot } from '../../shared/ipc'
+import type { WorktreeRun } from '../../shared/ipc'
 import type { RunRepository } from './types'
 
 export class MemoryRunRepository implements RunRepository {
@@ -12,11 +13,17 @@ export class MemoryRunRepository implements RunRepository {
     return this.snapshots.get(runId)
   }
 
-  appendEvent(runId: string, event: AgentEvent): RunSnapshot | undefined {
+  async appendEvent(runId: string, event: AgentEvent): Promise<RunSnapshot | undefined> {
     const snapshot = this.snapshots.get(runId)
     if (!snapshot) return undefined
     const next = { ...snapshot, events: [...snapshot.events, event] }
     this.snapshots.set(runId, next)
     return next
+  }
+
+  async listRuns(): Promise<WorktreeRun[]> {
+    return [...this.snapshots.values()]
+      .map((snapshot) => snapshot.run)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 }

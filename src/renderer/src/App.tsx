@@ -8,6 +8,7 @@ import type {
   ProviderSummary,
   RunSnapshot,
   RunStatus,
+  WorktreeRun,
   ProviderConfigInput,
   ProviderTestResult,
 } from '../../shared/ipc'
@@ -70,6 +71,7 @@ function App(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [projectState, setProjectState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [requirement, setRequirement] = useState('')
+  const [runs, setRuns] = useState<WorktreeRun[]>([])
   const [run, setRun] = useState<RunSnapshot>()
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [activeView, setActiveView] = useState<View>('session')
@@ -87,6 +89,19 @@ function App(): React.JSX.Element {
         setLoadState('ready')
       })
       .catch(() => setLoadState('error'))
+  }, [])
+
+  useEffect(() => {
+    let canceled = false
+    window.paracode
+      .listRuns()
+      .then((items) => {
+        if (!canceled) setRuns(items)
+      })
+      .catch(() => undefined)
+    return () => {
+      canceled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -148,6 +163,24 @@ function App(): React.JSX.Element {
               updatedAt: event.timestamp,
             },
           }
+        })
+        setRuns((current) => {
+          if (event.type !== 'run_status_changed') return current
+          const status = payloadString(event.payload, 'status') as RunStatus | undefined
+          if (!status) return current
+          return current.map((item) =>
+            item.id === event.runId
+              ? {
+                  ...item,
+                  status,
+                  latestMessage: payloadString(event.payload, 'message') ?? item.latestMessage,
+                  worktreePath: payloadString(event.payload, 'worktreePath') ?? item.worktreePath,
+                  branchName: payloadString(event.payload, 'branchName') ?? item.branchName,
+                  baseRef: payloadString(event.payload, 'baseRef') ?? item.baseRef,
+                  updatedAt: event.timestamp,
+                }
+              : item,
+          )
         })
       }),
     [],
@@ -252,6 +285,7 @@ function App(): React.JSX.Element {
         model: selectedModel,
       })
       setRun(snapshot)
+      setRuns((current) => [snapshot.run, ...current])
       setEvents((current) => mergeEvents(snapshot.events, current))
       setActionState('idle')
     } catch (error) {
@@ -286,6 +320,18 @@ function App(): React.JSX.Element {
     setErrorMessage(undefined)
     setActionState('idle')
     setActiveView('session')
+  }
+
+  async function openRun(runId: string): Promise<void> {
+    try {
+      const snapshot = await window.paracode.getRun(runId)
+      setRun(snapshot)
+      setEvents(snapshot.events)
+      setRequirement(snapshot.run.requirement)
+      setActiveView('session')
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '打开任务失败')
+    }
   }
 
   function refreshProviders(nextProviders: ProviderSummary[]): void {
@@ -408,6 +454,21 @@ function App(): React.JSX.Element {
                 <small>{runStatus}</small>
               </span>
             </button>
+          ) : runs.length > 0 ? (
+            runs.map((item) => (
+              <button
+                className="session-item"
+                key={item.id}
+                type="button"
+                onClick={() => void openRun(item.id)}
+              >
+                <span className={`session-dot ${item.status}`} aria-hidden="true" />
+                <span className="session-item-text">
+                  <strong>{shorten(item.requirement, 28)}</strong>
+                  <small>{STATUS_LABELS[item.status]}</small>
+                </span>
+              </button>
+            ))
           ) : (
             <p className="sidebar-empty">还没有编码会话</p>
           )}
@@ -494,7 +555,11 @@ function App(): React.JSX.Element {
           />
         ) : null}
         {activeView === 'board' ? (
-          <BoardView run={run} timeline={timeline} onOpenSession={() => setActiveView('session')} />
+          <BoardView
+            runs={runs}
+            activeRunId={run?.run.id}
+            onOpenSession={(runId) => void openRun(runId)}
+          />
         ) : null}
         {activeView === 'queue' ? (
           <QueueView events={events} onOpenSession={() => setActiveView('session')} />
@@ -687,13 +752,13 @@ function SessionView({
 }
 
 function BoardView({
-  run,
-  timeline,
+  runs,
+  activeRunId,
   onOpenSession,
 }: {
-  run?: RunSnapshot
-  timeline: TimelineEntry[]
-  onOpenSession: () => void
+  runs: WorktreeRun[]
+  activeRunId?: string
+  onOpenSession: (runId: string) => void
 }): React.JSX.Element {
   return (
     <section className="secondary-view" aria-label="并行看板">
@@ -703,34 +768,35 @@ function BoardView({
           <h1>并行看板</h1>
           <p>当前阶段展示真实 worktree 状态，更多并行任务将在分组流程接入后出现。</p>
         </div>
-        <span className="view-summary">{run ? '1 个 worktree' : '暂无 worktree'}</span>
+        <span className="view-summary">
+          {runs.length > 0 ? `${runs.length} 个 worktree` : '暂无 worktree'}
+        </span>
       </div>
-      {run ? (
-        <article className="worktree-card">
-          <div className="worktree-card-head">
-            <span className={`session-dot ${run.run.status}`} aria-hidden="true" />
-            <strong>{run.run.branchName || '未命名分支'}</strong>
-            <span className={`status-badge ${run.run.status}`}>
-              {STATUS_LABELS[run.run.status]}
-            </span>
-          </div>
-          <p>{run.run.requirement}</p>
-          <div className="worktree-stats">
-            <span>
-              {timeline.reduce(
-                (count, entry) =>
-                  count + (entry.kind === 'activityGroup' ? (entry.items?.length ?? 0) : 0),
-                0,
-              )}{' '}
-              个活动
-            </span>
-            <span>{timeline.filter((entry) => entry.kind === 'test').length} 个测试结果</span>
-            <span>{run.run.latestMessage ?? '等待 Agent 更新'}</span>
-          </div>
-          <button className="secondary-button" type="button" onClick={onOpenSession}>
-            打开会话
-          </button>
-        </article>
+      {runs.length > 0 ? (
+        <div className="worktree-grid">
+          {runs.map((item) => (
+            <article className="worktree-card" key={item.id}>
+              <div className="worktree-card-head">
+                <span className={`session-dot ${item.status}`} aria-hidden="true" />
+                <strong>{item.branchName || '未命名分支'}</strong>
+                <span className={`status-badge ${item.status}`}>{STATUS_LABELS[item.status]}</span>
+              </div>
+              <p>{item.requirement}</p>
+              <div className="worktree-stats">
+                <span>{formatTime(item.createdAt)}</span>
+                <span>{projectLabel(item.repositoryPath)}</span>
+                <span>{item.latestMessage ?? '等待 Agent 更新'}</span>
+              </div>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onOpenSession(item.id)}
+              >
+                {activeRunId === item.id ? '查看当前会话' : '打开会话'}
+              </button>
+            </article>
+          ))}
+        </div>
       ) : (
         <EmptyState
           title="还没有并行任务"

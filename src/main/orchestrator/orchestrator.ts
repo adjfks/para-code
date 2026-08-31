@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 
-import type { AgentEvent, RunSnapshot, RunStatus, StartTaskInput } from '../../shared/ipc'
+import type {
+  AgentEvent,
+  RunSnapshot,
+  RunStatus,
+  StartTaskInput,
+  WorktreeRun,
+} from '../../shared/ipc'
 import type { AgentProvider, Orchestrator, RunRepository, WorktreeManager } from './types'
 
 export class DefaultOrchestrator implements Orchestrator {
@@ -14,9 +20,7 @@ export class DefaultOrchestrator implements Orchestrator {
   constructor(
     private readonly worktrees: WorktreeManager,
     private readonly agent: AgentProvider,
-    private readonly repository: RunRepository & {
-      appendEvent?: (runId: string, event: AgentEvent) => RunSnapshot | undefined
-    },
+    private readonly repository: RunRepository,
   ) {}
 
   async startTask(input: StartTaskInput): Promise<RunSnapshot> {
@@ -147,6 +151,10 @@ export class DefaultOrchestrator implements Orchestrator {
     return this.repository.get(runId)
   }
 
+  async listRuns(): Promise<WorktreeRun[]> {
+    return this.repository.listRuns()
+  }
+
   onEvent(listener: (event: AgentEvent) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -197,8 +205,10 @@ export class DefaultOrchestrator implements Orchestrator {
       type: event.type,
       payload: event.payload,
     }
-    const stored = this.repository.appendEvent?.(runId, agentEvent)
-    const next = stored ?? { ...snapshot, events: [...snapshot.events, agentEvent] }
+    const next = (await this.repository.appendEvent(runId, agentEvent)) ?? {
+      ...snapshot,
+      events: [...snapshot.events, agentEvent],
+    }
     const nextStatus =
       next.run.status === 'canceled' ? undefined : statusForEvent(event.type, event.payload)
     const finalSnapshot = {

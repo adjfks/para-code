@@ -1599,12 +1599,19 @@ code {
 }
 
 .secondary-view-header,
-.worktree-card,
 .queue-list,
 .empty-state {
   width: min(980px, 100%);
   margin-right: auto;
   margin-left: auto;
+}
+
+.worktree-grid {
+  width: min(980px, 100%);
+  margin: 18px auto 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
 }
 
 .secondary-view-header {
@@ -1640,7 +1647,8 @@ code {
 }
 
 .worktree-card {
-  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
 }
 
 .worktree-card-head,
@@ -1674,6 +1682,11 @@ code {
   margin-bottom: 14px;
   color: #87919c;
   font-size: 10.5px;
+}
+
+.worktree-card .secondary-button {
+  margin-top: auto;
+  align-self: flex-start;
 }
 
 .empty-state {
