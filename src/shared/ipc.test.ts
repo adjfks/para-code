@@ -10,5 +10,7 @@ describe('IPC channels', () => {
   it('keeps the run persistence channels stable', () => {
     expect(IPC_CHANNELS.runList).toBe('run:list')
     expect(IPC_CHANNELS.runGet).toBe('run:get')
+    expect(IPC_CHANNELS.interactionList).toBe('run:list-interactions')
+    expect(IPC_CHANNELS.interactionAnswer).toBe('run:answer-interaction')
   })
 })

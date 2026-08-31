@@ -56,6 +56,41 @@ describe('SqliteRunRepository', () => {
     reopenedDatabase.close()
   })
 
+  it('persists queued interactions and does not downgrade answered ones', async () => {
+    const snapshot = createSnapshot('run-ask')
+    const queued = {
+      id: 'interaction-1',
+      runId: 'run-ask',
+      eventId: 'event-q',
+      type: 'question' as const,
+      status: 'queued' as const,
+      title: 'Agent 需要你的回答',
+      message: '先补测试还是先改实现？',
+      options: [{ id: 'tests-first', label: '先补测试' }],
+      createdAt: snapshot.run.createdAt,
+    }
+    await repository.save({ ...snapshot, interactions: [queued] })
+    await repository.save({
+      ...snapshot,
+      interactions: [
+        {
+          ...queued,
+          status: 'answered',
+          idempotencyKey: 'key-1',
+          answer: { optionId: 'tests-first' },
+          answeredAt: snapshot.run.createdAt,
+        },
+      ],
+    })
+    await repository.save({ ...snapshot, interactions: [queued] })
+
+    const loaded = await repository.get('run-ask')
+    expect(loaded?.interactions).toHaveLength(1)
+    expect(loaded?.interactions[0]?.status).toBe('answered')
+    expect(loaded?.interactions[0]?.answer).toEqual({ optionId: 'tests-first' })
+    expect((await repository.listInteractions()).map((item) => item.id)).toEqual(['interaction-1'])
+  })
+
   it('rejects an event for an unknown run', async () => {
     await expect(repository.appendEvent('missing', createEvent('missing', 1))).rejects.toThrow(
       '运行记录不存在',
@@ -99,6 +134,7 @@ function createSnapshot(id: string, createdAt = new Date().toISOString()): RunSn
       updatedAt: createdAt,
     },
     events: [],
+    interactions: [],
   }
 }
 

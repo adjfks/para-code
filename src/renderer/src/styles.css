@@ -1156,6 +1156,19 @@ code {
   margin-top: 7px;
 }
 
+.composer-actions,
+.answer-options,
+.queue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.answer-options {
+  margin-top: 8px;
+}
+
 .composer-context {
   display: flex;
   min-width: 0;

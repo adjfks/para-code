@@ -8,6 +8,7 @@ import {
   type ProviderConfigInput,
   type ProviderSummary,
   type ProviderTestResult,
+  type AnswerInteractionInput,
   type StartTaskInput,
 } from '../shared/ipc'
 import { CodexAppServerProvider } from './orchestrator/codex-app-server'
@@ -97,6 +98,12 @@ export function registerIpcHandlers(): void {
     return snapshot
   })
 
+  ipcMain.handle(IPC_CHANNELS.interactionList, async () => orchestrator.listInteractions())
+
+  ipcMain.handle(IPC_CHANNELS.interactionAnswer, async (_event, input: AnswerInteractionInput) =>
+    orchestrator.answerInteraction(input),
+  )
+
   orchestrator.onEvent((event) => {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(IPC_CHANNELS.runEvent, event)
@@ -178,6 +185,7 @@ async function markInterruptedRuns(): Promise<void> {
   )
   const message = '应用重启导致任务中断，worktree 修改已保留。'
   for (const run of activeRuns) {
+    const snapshot = await runRepository.get(run.id)
     const event = await runRepository.appendRecoveryEvent(run, message)
     await runRepository.save({
       run: {
@@ -186,7 +194,10 @@ async function markInterruptedRuns(): Promise<void> {
         latestMessage: message,
         updatedAt: event?.timestamp ?? new Date().toISOString(),
       },
-      events: [],
+      events: snapshot?.events ?? [],
+      interactions: (snapshot?.interactions ?? []).map((item) =>
+        item.status === 'queued' ? { ...item, status: 'canceled' } : item,
+      ),
     })
   }
 }

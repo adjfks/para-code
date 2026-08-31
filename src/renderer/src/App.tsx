@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import type {
   AgentEvent,
   AgentEventPayload,
+  AnswerInteractionInput,
   AppInfo,
+  InteractionRequest,
   ProjectSummary,
   ProviderSummary,
   RunSnapshot,
@@ -74,6 +76,7 @@ function App(): React.JSX.Element {
   const [runs, setRuns] = useState<WorktreeRun[]>([])
   const [run, setRun] = useState<RunSnapshot>()
   const [events, setEvents] = useState<AgentEvent[]>([])
+  const [interactions, setInteractions] = useState<InteractionRequest[]>([])
   const [activeView, setActiveView] = useState<View>('session')
   const [actionState, setActionState] = useState<'idle' | 'starting' | 'stopping' | 'error'>('idle')
   const [errorMessage, setErrorMessage] = useState<string>()
@@ -97,6 +100,12 @@ function App(): React.JSX.Element {
       .listRuns()
       .then((items) => {
         if (!canceled) setRuns(items)
+      })
+      .catch(() => undefined)
+    window.paracode
+      .listInteractions()
+      .then((items) => {
+        if (!canceled) setInteractions(items)
       })
       .catch(() => undefined)
     return () => {
@@ -182,6 +191,17 @@ function App(): React.JSX.Element {
               : item,
           )
         })
+        if (
+          event.type === 'question' ||
+          event.type === 'approval_request' ||
+          event.type === 'interaction_answered' ||
+          event.type === 'session_canceled'
+        ) {
+          void window.paracode
+            .listInteractions()
+            .then(setInteractions)
+            .catch(() => undefined)
+        }
       }),
     [],
   )
@@ -198,9 +218,10 @@ function App(): React.JSX.Element {
           ? '项目可用'
           : '未选择项目'
   const runStatus = run ? STATUS_LABELS[run.run.status] : '尚未启动'
-  const queueCount = events.filter(
-    (event) => event.type === 'question' || event.type === 'approval_request',
-  ).length
+  const queueCount = interactions.filter((item) => item.status === 'queued').length
+  const pendingInteraction = interactions.find(
+    (item) => item.status === 'queued' && item.runId === run?.run.id,
+  )
   const currentActivity = timeline
     .flatMap((entry) => (entry.kind === 'activityGroup' ? (entry.items ?? []) : []))
     .find((entry) => entry.status === 'running')
@@ -294,6 +315,27 @@ function App(): React.JSX.Element {
     }
   }
 
+  async function answerInteraction(
+    input: Omit<AnswerInteractionInput, 'idempotencyKey'>,
+  ): Promise<void> {
+    setActionState('starting')
+    setErrorMessage(undefined)
+    try {
+      const snapshot = await window.paracode.answerInteraction({
+        ...input,
+        idempotencyKey: `ui:${input.requestId}`,
+      })
+      setRun(snapshot)
+      setEvents((current) => mergeEvents(snapshot.events, current))
+      setInteractions(await window.paracode.listInteractions())
+      setActionState('idle')
+      setActiveView('session')
+    } catch (error) {
+      setActionState('error')
+      setErrorMessage(error instanceof Error ? error.message : '回答失败')
+    }
+  }
+
   async function stopTask(): Promise<void> {
     if (!run || !isActiveStatus(run.run.status) || actionState === 'stopping') return
     setActionState('stopping')
@@ -327,6 +369,7 @@ function App(): React.JSX.Element {
       const snapshot = await window.paracode.getRun(runId)
       setRun(snapshot)
       setEvents(snapshot.events)
+      setInteractions((current) => mergeInteractions(snapshot.interactions, current))
       setRequirement(snapshot.run.requirement)
       setActiveView('session')
     } catch (error) {
@@ -538,12 +581,14 @@ function App(): React.JSX.Element {
             run={run}
             timeline={timeline}
             currentActivity={currentActivity}
+            pendingInteraction={pendingInteraction}
             actionState={actionState}
             errorMessage={errorMessage}
             onRequirementChange={setRequirement}
             onSelectProject={() => void addProject()}
             onStartTask={() => void startTask()}
             onStopTask={() => void stopTask()}
+            onAnswerInteraction={(input) => void answerInteraction(input)}
             providers={providers}
             selectedProviderId={selectedProviderId}
             selectedModel={selectedModel}
@@ -562,7 +607,12 @@ function App(): React.JSX.Element {
           />
         ) : null}
         {activeView === 'queue' ? (
-          <QueueView events={events} onOpenSession={() => setActiveView('session')} />
+          <QueueView
+            interactions={interactions}
+            answering={actionState === 'starting'}
+            onOpenSession={(runId) => void openRun(runId)}
+            onAnswer={(input) => void answerInteraction(input)}
+          />
         ) : null}
         {activeView === 'settings' ? (
           <SettingsView
@@ -583,12 +633,14 @@ function SessionView({
   run,
   timeline,
   currentActivity,
+  pendingInteraction,
   actionState,
   errorMessage,
   onRequirementChange,
   onSelectProject,
   onStartTask,
   onStopTask,
+  onAnswerInteraction,
   providers,
   selectedProviderId,
   selectedModel,
@@ -601,12 +653,14 @@ function SessionView({
   run?: RunSnapshot
   timeline: TimelineEntry[]
   currentActivity?: ActivityEntry
+  pendingInteraction?: InteractionRequest
   actionState: 'idle' | 'starting' | 'stopping' | 'error'
   errorMessage?: string
   onRequirementChange: (value: string) => void
   onSelectProject: () => void
   onStartTask: () => void
   onStopTask: () => void
+  onAnswerInteraction: (input: Omit<AnswerInteractionInput, 'idempotencyKey'>) => void
   providers: ProviderSummary[]
   selectedProviderId?: string
   selectedModel?: string
@@ -618,12 +672,34 @@ function SessionView({
     actionState !== 'starting' &&
     actionState !== 'stopping'
   const isRunning = Boolean(run && isActiveStatus(run.run.status))
+  const canAnswer = Boolean(pendingInteraction) && actionState === 'idle'
+  const [reply, setReply] = useState('')
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
-    if (event.key === 'Enter' && !event.shiftKey && !run) {
-      event.preventDefault()
-      if (canStart) onStartTask()
+    if (event.key !== 'Enter' || event.shiftKey) return
+    event.preventDefault()
+    if (!run && canStart) {
+      onStartTask()
+      return
     }
+    if (
+      pendingInteraction &&
+      canAnswer &&
+      (reply.trim() || pendingInteraction.options.length > 0)
+    ) {
+      submitAnswer()
+    }
+  }
+
+  function submitAnswer(optionId?: string, decision?: AnswerInteractionInput['decision']): void {
+    if (!pendingInteraction || !canAnswer) return
+    onAnswerInteraction({
+      requestId: pendingInteraction.id,
+      text: reply.trim() || undefined,
+      optionId,
+      decision,
+    })
+    setReply('')
   }
 
   return (
@@ -682,18 +758,61 @@ function SessionView({
         <div className="composer">
           <textarea
             id="requirement"
-            value={requirement}
-            onChange={(event) => onRequirementChange(event.target.value)}
+            value={pendingInteraction ? reply : requirement}
+            onChange={(event) =>
+              pendingInteraction
+                ? setReply(event.target.value)
+                : onRequirementChange(event.target.value)
+            }
             onKeyDown={handleKeyDown}
             placeholder={
-              run
-                ? '当前会话的继续交互即将开放'
-                : '描述一个要完成的编码任务，支持粘贴完整需求或 bug 列表'
+              pendingInteraction
+                ? pendingInteraction.type === 'approval'
+                  ? pendingInteraction.message
+                  : '回答 Agent 的问题，或选择下方选项'
+                : run
+                  ? 'Agent 执行中，阻塞问题会出现在这里'
+                  : '描述一个要完成的编码任务，支持粘贴完整需求或 bug 列表'
             }
-            rows={run ? 1 : 3}
-            disabled={Boolean(run)}
-            aria-label={run ? '当前会话输入' : '编码需求'}
+            rows={run && !pendingInteraction ? 1 : 3}
+            disabled={Boolean(run) && !pendingInteraction}
+            aria-label={pendingInteraction ? '回答 Agent' : run ? '当前会话输入' : '编码需求'}
           />
+          {pendingInteraction?.options.length ? (
+            <div className="answer-options" role="group" aria-label="可选回答">
+              {pendingInteraction.options.map((option) => (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  key={option.id}
+                  disabled={!canAnswer}
+                  onClick={() => submitAnswer(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {pendingInteraction?.type === 'approval' ? (
+            <div className="answer-options" role="group" aria-label="审批决定">
+              <button
+                className="send-button"
+                type="button"
+                disabled={!canAnswer}
+                onClick={() => submitAnswer(undefined, 'allow')}
+              >
+                允许执行
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={!canAnswer}
+                onClick={() => submitAnswer(undefined, 'deny')}
+              >
+                拒绝
+              </button>
+            </div>
+          ) : null}
           <div className="composer-controls">
             <div className="composer-context">
               <button className="composer-chip" type="button" onClick={onSelectProject}>
@@ -710,16 +829,32 @@ function SessionView({
               <span className="composer-chip readonly">工作区写入</span>
             </div>
             {isRunning ? (
-              <button
-                className="stop-button"
-                type="button"
-                disabled={actionState === 'stopping'}
-                onClick={onStopTask}
-                aria-label="停止当前任务"
-              >
-                <span className="stop-icon" aria-hidden="true" />
-                {actionState === 'stopping' ? '停止中…' : '停止任务'}
-              </button>
+              <div className="composer-actions">
+                {pendingInteraction && pendingInteraction.type === 'question' ? (
+                  <button
+                    className="send-button"
+                    type="button"
+                    disabled={
+                      !canAnswer || (!reply.trim() && pendingInteraction.options.length === 0)
+                    }
+                    onClick={() => submitAnswer()}
+                    aria-label="回答并继续"
+                  >
+                    {actionState === 'starting' ? '提交中…' : '回答并继续'}
+                    <span aria-hidden="true">↑</span>
+                  </button>
+                ) : null}
+                <button
+                  className="stop-button"
+                  type="button"
+                  disabled={actionState === 'stopping'}
+                  onClick={onStopTask}
+                  aria-label="停止当前任务"
+                >
+                  <span className="stop-icon" aria-hidden="true" />
+                  {actionState === 'stopping' ? '停止中…' : '停止任务'}
+                </button>
+              </div>
             ) : (
               <button
                 className="send-button"
@@ -735,9 +870,11 @@ function SessionView({
           </div>
         </div>
         <div className="composer-hint">
-          {run
-            ? '任务运行中，后续追问与审批回复将在下一阶段接入。'
-            : 'Enter 开始执行 · Shift + Enter 换行'}
+          {pendingInteraction
+            ? '回答后 Agent 会在当前 session 继续，不会新建任务。'
+            : run
+              ? '任务运行中。Agent 提问或请求授权时，可在此回答。'
+              : 'Enter 开始执行 · Shift + Enter 换行'}
           {isRunning ? (
             <span className="live-hint">
               <span className="live-dot" />
@@ -808,44 +945,79 @@ function BoardView({
 }
 
 function QueueView({
-  events,
+  interactions,
+  answering,
   onOpenSession,
+  onAnswer,
 }: {
-  events: AgentEvent[]
-  onOpenSession: () => void
+  interactions: InteractionRequest[]
+  answering: boolean
+  onOpenSession: (runId: string) => void
+  onAnswer: (input: Omit<AnswerInteractionInput, 'idempotencyKey'>) => void
 }): React.JSX.Element {
-  const queueEvents = events.filter(
-    (event) => event.type === 'question' || event.type === 'approval_request',
-  )
+  const queued = interactions.filter((item) => item.status === 'queued')
   return (
     <section className="secondary-view" aria-label="交互队列">
       <div className="secondary-view-header">
         <div>
           <p className="eyebrow">需要你的决定</p>
           <h1>交互队列</h1>
-          <p>Agent 需要提问或请求授权时，会集中显示在这里。</p>
+          <p>Agent 需要提问或请求授权时，会集中显示在这里。回答后原 session 继续执行。</p>
         </div>
-        <span className="view-summary">{queueEvents.length} 个待处理</span>
+        <span className="view-summary">{queued.length} 个待处理</span>
       </div>
-      {queueEvents.length > 0 ? (
+      {queued.length > 0 ? (
         <div className="queue-list">
-          {queueEvents.map((event) => (
-            <article className="queue-item" key={event.id}>
+          {queued.map((item) => (
+            <article className="queue-item" key={item.id}>
               <div className="queue-item-head">
-                <span
-                  className={`queue-tag ${event.type === 'approval_request' ? 'approval' : ''}`}
-                >
-                  {event.type === 'approval_request' ? '授权' : '提问'}
+                <span className={`queue-tag ${item.type === 'approval' ? 'approval' : ''}`}>
+                  {item.type === 'approval' ? '授权' : '提问'}
                 </span>
-                <time>{formatTime(event.timestamp)}</time>
+                <time>{formatTime(item.createdAt)}</time>
               </div>
-              <h2>
-                {event.type === 'approval_request' ? 'Agent 等待执行许可' : 'Agent 需要你的回答'}
-              </h2>
-              <p>{payloadSummary(event.payload)}</p>
-              <button className="secondary-button" type="button" onClick={onOpenSession}>
-                打开会话
-              </button>
+              <h2>{item.title}</h2>
+              <p>{item.message}</p>
+              <div className="queue-actions">
+                {item.type === 'approval' ? (
+                  <>
+                    <button
+                      className="send-button"
+                      type="button"
+                      disabled={answering}
+                      onClick={() => onAnswer({ requestId: item.id, decision: 'allow' })}
+                    >
+                      允许执行
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={answering}
+                      onClick={() => onAnswer({ requestId: item.id, decision: 'deny' })}
+                    >
+                      拒绝
+                    </button>
+                  </>
+                ) : null}
+                {item.options.map((option) => (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    key={option.id}
+                    disabled={answering}
+                    onClick={() => onAnswer({ requestId: item.id, optionId: option.id })}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => onOpenSession(item.runId)}
+                >
+                  打开会话
+                </button>
+              </div>
             </article>
           ))}
         </div>
@@ -1646,6 +1818,17 @@ function buildTimeline(events: AgentEvent[]): TimelineEntry[] {
       })
       continue
     }
+    if (event.type === 'interaction_answered') {
+      entries.push({
+        id: event.id,
+        kind: 'system',
+        title: '已回答，Agent 继续执行',
+        body: payloadSummary(payload),
+        timestamp: event.timestamp,
+        status: 'completed',
+      })
+      continue
+    }
     if (event.type === 'approval_request' || event.type === 'question') {
       entries.push({
         id: event.id,
@@ -1775,6 +1958,15 @@ function mergeEvents(...eventLists: AgentEvent[][]): AgentEvent[] {
   const byId = new Map<string, AgentEvent>()
   eventLists.flat().forEach((event) => byId.set(event.id, event))
   return [...byId.values()].sort((a, b) => a.sequence - b.sequence)
+}
+
+function mergeInteractions(
+  incoming: InteractionRequest[],
+  current: InteractionRequest[],
+): InteractionRequest[] {
+  const byId = new Map(current.map((item) => [item.id, item]))
+  for (const item of incoming) byId.set(item.id, item)
+  return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 }
 
 function payloadString(payload: AgentEventPayload, key: string): string | undefined {

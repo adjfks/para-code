@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
   runList: 'run:list',
   runGet: 'run:get',
   runEvent: 'run:event',
+  interactionList: 'run:list-interactions',
+  interactionAnswer: 'run:answer-interaction',
   providerList: 'provider:list',
   providerCreate: 'provider:create',
   providerUpdate: 'provider:update',
@@ -53,6 +55,8 @@ export interface ParaCodeApi {
   stopTask: (runId: string) => Promise<RunSnapshot>
   listRuns: () => Promise<WorktreeRun[]>
   getRun: (runId: string) => Promise<RunSnapshot>
+  listInteractions: () => Promise<InteractionRequest[]>
+  answerInteraction: (input: AnswerInteractionInput) => Promise<RunSnapshot>
   onRunEvent: (listener: (event: AgentEvent) => void) => () => void
   listProviders: () => Promise<ProviderSummary[]>
   createProvider: (input: ProviderConfigInput) => Promise<ProviderSummary[]>
@@ -122,6 +126,7 @@ export type AgentEventType =
   | 'tool_finished'
   | 'question'
   | 'approval_request'
+  | 'interaction_answered'
   | 'commit_created'
   | 'test_result'
   | 'session_paused'
@@ -186,7 +191,49 @@ export interface AgentEventPayload extends Record<string, unknown> {
   status?: string
 }
 
+export type InteractionType = 'question' | 'approval'
+export type InteractionStatus = 'queued' | 'answered' | 'canceled'
+export type InteractionDecision = 'allow' | 'deny'
+
+export interface InteractionOption {
+  id: string
+  label: string
+}
+
+export interface InteractionAnswer {
+  text?: string
+  optionId?: string
+  decision?: InteractionDecision
+}
+
+export interface InteractionRequest {
+  id: string
+  runId: string
+  eventId: string
+  agentSessionId?: string
+  type: InteractionType
+  status: InteractionStatus
+  title: string
+  message: string
+  options: InteractionOption[]
+  providerRequestId?: number | string
+  providerMethod?: string
+  idempotencyKey?: string
+  answer?: InteractionAnswer
+  createdAt: string
+  answeredAt?: string
+}
+
+export interface AnswerInteractionInput {
+  requestId: string
+  idempotencyKey: string
+  text?: string
+  optionId?: string
+  decision?: InteractionDecision
+}
+
 export interface RunSnapshot {
   run: WorktreeRun
   events: AgentEvent[]
+  interactions: InteractionRequest[]
 }

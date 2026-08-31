@@ -32,6 +32,17 @@ describe('DefaultOrchestrator', () => {
 
     expect(snapshot.run.status).toBe('creating')
     await waitFor(
+      () => repository.get(snapshot.run.id).then((value) => value?.run.status === 'waiting_human'),
+      repository,
+      snapshot.run.id,
+    )
+    const pending = await orchestrator.listInteractions()
+    await orchestrator.answerInteraction({
+      requestId: pending[0]!.id,
+      idempotencyKey: `start-${snapshot.run.id}`,
+      optionId: 'tests-first',
+    })
+    await waitFor(
       () =>
         repository
           .get(snapshot.run.id)
@@ -93,6 +104,65 @@ describe('DefaultOrchestrator', () => {
     expect(events).not.toContain('session_completed')
     expect((await orchestrator.getRun(snapshot.run.id))?.run.status).toBe('canceled')
   })
+
+  it('queues a blocking question and resumes after an idempotent answer', async () => {
+    const repositoryPath = await createRepository()
+    const repository = new MemoryRunRepository()
+    const orchestrator = new DefaultOrchestrator(
+      new GitWorktreeManager(),
+      new FakeAgentProvider(),
+      repository,
+    )
+
+    const snapshot = await orchestrator.startTask({
+      repositoryPath,
+      requirement: '添加 greeting 函数，需要确认实现顺序',
+    })
+
+    await waitFor(
+      () => repository.get(snapshot.run.id).then((value) => value?.run.status === 'waiting_human'),
+      repository,
+      snapshot.run.id,
+    )
+
+    const pending = await orchestrator.listInteractions()
+    expect(pending).toHaveLength(1)
+    expect(pending[0]?.status).toBe('queued')
+    expect(pending[0]?.type).toBe('question')
+
+    const [first, second] = await Promise.all([
+      orchestrator.answerInteraction({
+        requestId: pending[0]!.id,
+        idempotencyKey: 'answer-1',
+        optionId: 'tests-first',
+      }),
+      orchestrator.answerInteraction({
+        requestId: pending[0]!.id,
+        idempotencyKey: 'answer-1',
+        optionId: 'tests-first',
+      }),
+    ])
+
+    expect(first.interactions.filter((item) => item.status === 'answered')).toHaveLength(1)
+    expect(second.interactions.filter((item) => item.status === 'answered')).toHaveLength(1)
+    expect(first.events.filter((event) => event.type === 'interaction_answered')).toHaveLength(1)
+    expect(second.events.filter((event) => event.type === 'interaction_answered')).toHaveLength(1)
+
+    await waitFor(
+      () =>
+        repository
+          .get(snapshot.run.id)
+          .then(
+            (value) => value?.events.some((event) => event.type === 'session_completed') ?? false,
+          ),
+      repository,
+      snapshot.run.id,
+    )
+
+    const completed = await orchestrator.getRun(snapshot.run.id)
+    expect(completed?.run.status).toBe('ready_for_review')
+    expect(await orchestrator.listInteractions()).toEqual([])
+  }, 30_000)
 
   it('makes concurrent stop requests idempotent', async () => {
     const repositoryPath = await createRepository()

@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto'
 
 import type {
   AgentEvent,
+  AnswerInteractionInput,
+  InteractionRequest,
   RunSnapshot,
   RunStatus,
   StartTaskInput,
   WorktreeRun,
 } from '../../shared/ipc'
+import { interactionFromEvent } from './interaction'
 import type { AgentProvider, Orchestrator, RunRepository, WorktreeManager } from './types'
 
 export class DefaultOrchestrator implements Orchestrator {
@@ -14,6 +17,7 @@ export class DefaultOrchestrator implements Orchestrator {
   private readonly eventChains = new Map<string, Promise<void>>()
   private readonly agentSessions = new Map<string, string>()
   private readonly stopTasks = new Map<string, Promise<RunSnapshot>>()
+  private readonly answerTasks = new Map<string, Promise<RunSnapshot>>()
   private readonly cancelRequested = new Set<string>()
   private readonly worktreeTasks = new Map<string, Promise<unknown>>()
 
@@ -39,7 +43,7 @@ export class DefaultOrchestrator implements Orchestrator {
     if (!run.requirement) throw new Error('需求不能为空。')
     await this.worktrees.validate?.(input)
 
-    let snapshot: RunSnapshot = { run, events: [] }
+    let snapshot: RunSnapshot = { run, events: [], interactions: [] }
     await this.repository.save(snapshot)
     snapshot = await this.updateStatus(
       snapshot,
@@ -137,6 +141,7 @@ export class DefaultOrchestrator implements Orchestrator {
       await this.worktreeTasks.get(runId)?.catch(() => undefined)
     }
 
+    await this.cancelQueuedInteractions(runId)
     this.enqueueEvent(runId, {
       agentSessionId,
       type: 'session_canceled',
@@ -153,6 +158,23 @@ export class DefaultOrchestrator implements Orchestrator {
 
   async listRuns(): Promise<WorktreeRun[]> {
     return this.repository.listRuns()
+  }
+
+  async listInteractions(): Promise<InteractionRequest[]> {
+    return (await this.repository.listInteractions()).filter((item) => item.status === 'queued')
+  }
+
+  async answerInteraction(input: AnswerInteractionInput): Promise<RunSnapshot> {
+    const existing = this.answerTasks.get(input.requestId)
+    if (existing) return existing
+    const pending = this.answerInteractionInternal(input)
+    this.answerTasks.set(input.requestId, pending)
+    try {
+      return await pending
+    } finally {
+      if (this.answerTasks.get(input.requestId) === pending)
+        this.answerTasks.delete(input.requestId)
+    }
   }
 
   onEvent(listener: (event: AgentEvent) => void): () => void {
@@ -209,10 +231,16 @@ export class DefaultOrchestrator implements Orchestrator {
       ...snapshot,
       events: [...snapshot.events, agentEvent],
     }
+    const created = interactionFromEvent(agentEvent)
+    const interactions =
+      created && !next.interactions.some((item) => item.id === created.id)
+        ? [...next.interactions, created]
+        : next.interactions
     const nextStatus =
       next.run.status === 'canceled' ? undefined : statusForEvent(event.type, event.payload)
     const finalSnapshot = {
       ...next,
+      interactions,
       run: {
         ...next.run,
         status: nextStatus ?? next.run.status,
@@ -242,6 +270,71 @@ export class DefaultOrchestrator implements Orchestrator {
     await this.eventChains.get(runId)
   }
 
+  private async answerInteractionInternal(input: AnswerInteractionInput): Promise<RunSnapshot> {
+    const request = (await this.repository.listInteractions()).find(
+      (item) => item.id === input.requestId,
+    )
+    if (!request) throw new Error('交互请求不存在。')
+    let snapshot = await this.getRunOrThrow(request.runId)
+    if (request.status === 'answered') return snapshot
+    if (request.status === 'canceled' || snapshot.run.status === 'canceled') {
+      throw new Error('交互请求已取消。')
+    }
+
+    const answer = {
+      text: input.text,
+      optionId: input.optionId,
+      decision: input.decision,
+    }
+    const agentSessionId = request.agentSessionId ?? snapshot.run.agentSessionId
+    if (!agentSessionId) throw new Error('Agent 会话不存在。')
+    await this.agent.respond(agentSessionId, request, answer)
+
+    const answeredAt = new Date().toISOString()
+    snapshot = {
+      ...snapshot,
+      interactions: snapshot.interactions.map((item) =>
+        item.id === request.id
+          ? {
+              ...item,
+              status: 'answered',
+              idempotencyKey: input.idempotencyKey,
+              answer,
+              answeredAt,
+            }
+          : item,
+      ),
+    }
+    await this.repository.save(snapshot)
+    this.enqueueEvent(request.runId, {
+      agentSessionId,
+      type: 'interaction_answered',
+      payload: {
+        message:
+          answer.text ?? answer.optionId ?? (answer.decision === 'deny' ? '已拒绝' : '已批准'),
+        interactionId: request.id,
+      },
+    })
+    await this.updateStatus(
+      await this.getRunOrThrow(request.runId),
+      'coding',
+      '已收到回答，Agent 继续执行。',
+    )
+    await this.waitForEvents(request.runId)
+    return this.getRunOrThrow(request.runId)
+  }
+
+  private async cancelQueuedInteractions(runId: string): Promise<void> {
+    const snapshot = await this.getRunOrThrow(runId)
+    if (!snapshot.interactions.some((item) => item.status === 'queued')) return
+    await this.repository.save({
+      ...snapshot,
+      interactions: snapshot.interactions.map((item) =>
+        item.status === 'queued' ? { ...item, status: 'canceled' } : item,
+      ),
+    })
+  }
+
   private async getRunOrThrow(runId: string): Promise<RunSnapshot> {
     const snapshot = await this.repository.get(runId)
     if (!snapshot) throw new Error(`运行记录不存在：${runId}`)
@@ -263,6 +356,7 @@ function statusForEvent(
     session_started: 'planning',
     run_status_changed: undefined,
     approval_request: 'waiting_human',
+    question: 'waiting_human',
     test_result: 'testing',
     session_completed: 'ready_for_review',
     session_failed: 'failed',

@@ -14,6 +14,8 @@ const api: ParaCodeApi = {
   stopTask: (runId) => ipcRenderer.invoke(IPC_CHANNELS.stopTask, runId),
   listRuns: () => ipcRenderer.invoke(IPC_CHANNELS.runList),
   getRun: (runId) => ipcRenderer.invoke(IPC_CHANNELS.runGet, runId),
+  listInteractions: () => ipcRenderer.invoke(IPC_CHANNELS.interactionList),
+  answerInteraction: (input) => ipcRenderer.invoke(IPC_CHANNELS.interactionAnswer, input),
   onRunEvent: (listener) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

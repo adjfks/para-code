@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
 
+import type { InteractionAnswer } from '../../shared/ipc'
 import type { AgentProvider } from './types'
 
 interface FakeSession {
   controller: AbortController
   task: Promise<void>
+  resolveAnswer?: (answer: InteractionAnswer) => void
 }
 
 export class FakeAgentProvider implements AgentProvider {
@@ -36,8 +38,21 @@ export class FakeAgentProvider implements AgentProvider {
     const session = this.sessions.get(agentSessionId)
     if (!session) return
     session.controller.abort()
+    session.resolveAnswer?.({ text: 'canceled' })
     await session.task
     this.sessions.delete(agentSessionId)
+  }
+
+  async respond(
+    agentSessionId: string,
+    _request: Parameters<AgentProvider['respond']>[1],
+    answer: InteractionAnswer,
+  ): Promise<void> {
+    const session = this.sessions.get(agentSessionId)
+    if (!session?.resolveAnswer) throw new Error('当前 Agent 没有等待回答的请求。')
+    const resolve = session.resolveAnswer
+    session.resolveAnswer = undefined
+    resolve(answer)
   }
 
   private async run(
@@ -79,6 +94,20 @@ export class FakeAgentProvider implements AgentProvider {
         ],
       },
     })
+    if (!(await pause(280, signal))) return
+    emit({
+      agentSessionId,
+      type: 'question',
+      payload: {
+        message: '实现方式需要你确认：先补测试还是先改实现？',
+        options: [
+          { id: 'tests-first', label: '先补测试' },
+          { id: 'code-first', label: '先改实现' },
+        ],
+      },
+    })
+    const answered = await this.waitForAnswer(agentSessionId, signal)
+    if (!answered) return
     if (!(await pause(280, signal))) return
     emit({
       agentSessionId,
@@ -206,6 +235,22 @@ export class FakeAgentProvider implements AgentProvider {
       agentSessionId,
       type: 'session_completed',
       payload: { provider: 'fake', note: 'Fake Agent 已完成演示运行' },
+    })
+  }
+
+  private waitForAnswer(agentSessionId: string, signal: AbortSignal): Promise<boolean> {
+    const session = this.sessions.get(agentSessionId)
+    if (!session || signal.aborted) return Promise.resolve(false)
+    return new Promise((resolve) => {
+      const finish = (answered: boolean): void => {
+        signal.removeEventListener('abort', onAbort)
+        if (session.resolveAnswer === onAnswer) session.resolveAnswer = undefined
+        resolve(answered)
+      }
+      const onAbort = (): void => finish(false)
+      const onAnswer = (): void => finish(true)
+      session.resolveAnswer = onAnswer
+      signal.addEventListener('abort', onAbort, { once: true })
     })
   }
 }

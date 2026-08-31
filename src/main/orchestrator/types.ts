@@ -1,4 +1,12 @@
-import type { AgentEvent, RunSnapshot, StartTaskInput, WorktreeRun } from '../../shared/ipc'
+import type {
+  AgentEvent,
+  AnswerInteractionInput,
+  InteractionAnswer,
+  InteractionRequest,
+  RunSnapshot,
+  StartTaskInput,
+  WorktreeRun,
+} from '../../shared/ipc'
 
 export interface WorktreeMetadata {
   repositoryPath: string
@@ -25,12 +33,18 @@ export interface AgentProvider {
     emit: (event: Omit<AgentEvent, 'id' | 'runId' | 'sequence' | 'timestamp'>) => void,
   ): Promise<{ agentSessionId: string }>
   stop(agentSessionId: string): Promise<void>
+  respond(
+    agentSessionId: string,
+    request: InteractionRequest,
+    answer: InteractionAnswer,
+  ): Promise<void>
 }
 
 export interface RunRepository {
   save(snapshot: RunSnapshot): Promise<void>
   get(runId: string): Promise<RunSnapshot | undefined>
   listRuns(): Promise<WorktreeRun[]>
+  listInteractions(): Promise<InteractionRequest[]>
   appendEvent(runId: string, event: AgentEvent): Promise<RunSnapshot | undefined>
 }
 
@@ -39,6 +53,8 @@ export interface Orchestrator {
   stopTask(runId: string): Promise<RunSnapshot>
   getRun(runId: string): Promise<RunSnapshot | undefined>
   listRuns(): Promise<WorktreeRun[]>
+  listInteractions(): Promise<InteractionRequest[]>
+  answerInteraction(input: AnswerInteractionInput): Promise<RunSnapshot>
   onEvent(listener: (event: AgentEvent) => void): () => void
 }
 

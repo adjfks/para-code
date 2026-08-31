@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
-import type { AgentEvent } from '../../shared/ipc'
+import type { AgentEvent, InteractionAnswer, InteractionRequest } from '../../shared/ipc'
+import { providerResultForAnswer } from './interaction'
 import type { AgentProvider, AgentRunContext } from './types'
 
 interface JsonRpcResponse {
@@ -12,7 +13,7 @@ interface JsonRpcResponse {
 }
 
 interface JsonRpcServerRequest {
-  id: number
+  id: number | string
   method: string
   params?: Record<string, unknown>
 }
@@ -126,6 +127,19 @@ export class CodexAppServerProvider implements AgentProvider {
     }
   }
 
+  async respond(
+    agentSessionId: string,
+    request: InteractionRequest,
+    answer: InteractionAnswer,
+  ): Promise<void> {
+    const session = this.sessions.get(agentSessionId)
+    if (!session) throw new Error('Codex 会话不存在。')
+    if (request.providerRequestId === undefined) {
+      throw new Error('交互请求缺少 Codex request id，无法恢复执行。')
+    }
+    session.client.respond(request.providerRequestId, providerResultForAnswer(request, answer))
+  }
+
   async stop(agentSessionId: string): Promise<void> {
     const session = this.sessions.get(agentSessionId)
     if (!session) return
@@ -221,6 +235,10 @@ class JsonRpcClient {
     this.write({ method, params })
   }
 
+  respond(id: number | string, result: Record<string, unknown>): void {
+    this.write({ id, result })
+  }
+
   onNotification(listener: (notification: JsonRpcNotification) => void): void {
     this.notificationListener = listener
   }
@@ -241,7 +259,10 @@ class JsonRpcClient {
     } catch {
       return
     }
-    if (typeof message.id === 'number' && typeof message.method === 'string') {
+    if (
+      (typeof message.id === 'number' || typeof message.id === 'string') &&
+      typeof message.method === 'string'
+    ) {
       this.serverRequestListener?.({
         id: message.id,
         method: message.method,
@@ -264,7 +285,7 @@ class JsonRpcClient {
 function mapCodexNotification(
   notification: JsonRpcNotification,
   agentSessionId: string,
-  requestId?: number,
+  requestId?: number | string,
 ): Omit<AgentEvent, 'id' | 'runId' | 'sequence' | 'timestamp'> | undefined {
   const method = notification.method
   if (!method) return undefined
