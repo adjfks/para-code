@@ -1,8 +1,15 @@
-import type { AgentEvent, InteractionRequest, RunSnapshot, WorktreeRun } from '../../shared/ipc'
+import type {
+  AgentEvent,
+  GroupingPlan,
+  InteractionRequest,
+  RunSnapshot,
+  WorktreeRun,
+} from '../../shared/ipc'
 import type { RunRepository } from './types'
 
 export class MemoryRunRepository implements RunRepository {
   private readonly snapshots = new Map<string, RunSnapshot>()
+  private readonly plans = new Map<string, GroupingPlan>()
 
   async save(snapshot: RunSnapshot): Promise<void> {
     const current = this.snapshots.get(snapshot.run.id)
@@ -36,6 +43,15 @@ export class MemoryRunRepository implements RunRepository {
     return [...this.snapshots.values()]
       .flatMap((snapshot) => snapshot.interactions)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }
+
+  async savePlan(plan: GroupingPlan): Promise<void> {
+    this.plans.set(plan.id, plan)
+  }
+
+  async getPlan(planId: string): Promise<GroupingPlan | undefined> {
+    const plan = this.plans.get(planId)
+    return plan ? structuredClone(plan) : undefined
   }
 }
 

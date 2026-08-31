@@ -7,10 +7,11 @@ ParaCode 是一个本地优先的并行编码工作站：开发者在一个主�
 ## 当前状态
 
 - 单任务闭环已接通：干净 Git 仓库 → 隔离 worktree → Agent 执行 → 事件时间线。
+- 多条需求会先生成可编辑分组方案，确认后并行创建多个 worktree；部分失败可只重试失败项。
 - 阻塞提问和授权进入交互队列，回答后原 session 继续，不会新建任务。
-- 本地 SQLite 持久化 run、事件和 InteractionRequest；项目与 Provider 仍用本地配置文件。
+- 本地 SQLite 持久化 run、事件、InteractionRequest 和 GroupingPlan；项目与 Provider 仍用本地配置文件。
 - 默认使用 Fake Agent 验证流程；设置 `PARACODE_AGENT_PROVIDER=codex` 可接入 Codex app-server。
-- 多需求分组、依赖调度和完整权限策略尚未实现。
+- 依赖调度和完整权限策略尚未实现。
 
 ## 开发环境
 

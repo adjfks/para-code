@@ -8,8 +8,11 @@ import {
   type ProviderConfigInput,
   type ProviderSummary,
   type ProviderTestResult,
+  type AnalyzePlanInput,
   type AnswerInteractionInput,
+  type ConfirmPlanInput,
   type StartTaskInput,
+  type UpdatePlanInput,
 } from '../shared/ipc'
 import { CodexAppServerProvider } from './orchestrator/codex-app-server'
 import { DefaultOrchestrator } from './orchestrator/orchestrator'
@@ -86,6 +89,19 @@ export function registerIpcHandlers(): void {
     return orchestrator.startTask(input)
   })
 
+  ipcMain.handle(IPC_CHANNELS.planAnalyze, async (_event, input: AnalyzePlanInput) => {
+    validateTaskProvider(input)
+    return orchestrator.analyzePlan(input)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.planUpdate, async (_event, input: UpdatePlanInput) =>
+    orchestrator.updatePlan(input),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.planConfirm, async (_event, input: ConfirmPlanInput) =>
+    orchestrator.confirmPlan(input),
+  )
+
   ipcMain.handle(IPC_CHANNELS.stopTask, async (_event, runId: string) => {
     return orchestrator.stopTask(runId)
   })
@@ -161,7 +177,7 @@ export function registerIpcHandlers(): void {
   })
 }
 
-function validateTaskProvider(input: StartTaskInput): void {
+function validateTaskProvider(input: { providerId?: string; model?: string }): void {
   if (!input.providerId && !input.model) return
   if (!input.providerId) throw new Error('请选择 AI Provider。')
   if (!input.model) throw new Error('请选择模型。')

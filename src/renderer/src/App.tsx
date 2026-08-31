@@ -5,6 +5,8 @@ import type {
   AgentEventPayload,
   AnswerInteractionInput,
   AppInfo,
+  ConfirmPlanFailure,
+  GroupingPlan,
   InteractionRequest,
   ProjectSummary,
   ProviderSummary,
@@ -14,6 +16,7 @@ import type {
   ProviderConfigInput,
   ProviderTestResult,
 } from '../../shared/ipc'
+import { parseRequirementTexts } from '../../shared/requirements'
 
 type LoadState = 'loading' | 'ready' | 'error'
 type View = 'session' | 'board' | 'queue' | 'settings'
@@ -73,6 +76,8 @@ function App(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [projectState, setProjectState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [requirement, setRequirement] = useState('')
+  const [plan, setPlan] = useState<GroupingPlan>()
+  const [planFailures, setPlanFailures] = useState<ConfirmPlanFailure[]>([])
   const [runs, setRuns] = useState<WorktreeRun[]>([])
   const [run, setRun] = useState<RunSnapshot>()
   const [events, setEvents] = useState<AgentEvent[]>([])
@@ -299,6 +304,21 @@ function App(): React.JSX.Element {
     setRun(undefined)
     setActiveView('session')
     try {
+      const texts = parseRequirementTexts(requirement)
+      if (texts.length > 1) {
+        const nextPlan = await window.paracode.analyzePlan({
+          repositoryPath,
+          text: requirement.trim(),
+          providerId: selectedProviderId,
+          model: selectedModel,
+        })
+        setPlan(nextPlan)
+        setPlanFailures([])
+        setActionState('idle')
+        return
+      }
+      setPlan(undefined)
+      setPlanFailures([])
       const snapshot = await window.paracode.startTask({
         repositoryPath,
         requirement: requirement.trim(),
@@ -312,6 +332,64 @@ function App(): React.JSX.Element {
     } catch (error) {
       setActionState('error')
       setErrorMessage(error instanceof Error ? error.message : '任务启动失败')
+    }
+  }
+
+  async function movePlanRequirement(requirementId: string, targetGroupId: string): Promise<void> {
+    if (!plan || actionState === 'starting') return
+    setActionState('starting')
+    setErrorMessage(undefined)
+    try {
+      setPlan(
+        await window.paracode.updatePlan({
+          planId: plan.id,
+          version: plan.version,
+          requirementId,
+          targetGroupId,
+        }),
+      )
+      setPlanFailures([])
+      setActionState('idle')
+    } catch (error) {
+      setActionState('error')
+      setErrorMessage(error instanceof Error ? error.message : '调整分组失败')
+    }
+  }
+
+  async function confirmCurrentPlan(retry = false): Promise<void> {
+    if (!plan || actionState === 'starting') return
+    setActionState('starting')
+    setErrorMessage(undefined)
+    try {
+      const result = await window.paracode.confirmPlan({
+        planId: plan.id,
+        version: plan.version,
+        idempotencyKey: retry
+          ? `ui:${plan.id}:v${plan.version}:retry`
+          : `ui:${plan.id}:v${plan.version}`,
+      })
+      setPlan(result.plan)
+      setPlanFailures(result.failures)
+      setRuns((current) => {
+        const incoming = result.runs.map((item) => item.run)
+        return [
+          ...incoming,
+          ...current.filter((item) => incoming.every((run) => run.id !== item.id)),
+        ]
+      })
+      setActionState('idle')
+      if (result.failures.length > 0) {
+        setActiveView('session')
+        return
+      }
+      if (result.runs[0]) {
+        setRun(result.runs[0])
+        setEvents(result.runs[0].events)
+      }
+      setActiveView(result.runs.length > 1 ? 'board' : 'session')
+    } catch (error) {
+      setActionState('error')
+      setErrorMessage(error instanceof Error ? error.message : '确认分组失败')
     }
   }
 
@@ -358,6 +436,8 @@ function App(): React.JSX.Element {
     }
     setRun(undefined)
     setEvents([])
+    setPlan(undefined)
+    setPlanFailures([])
     setRequirement('')
     setErrorMessage(undefined)
     setActionState('idle')
@@ -578,6 +658,8 @@ function App(): React.JSX.Element {
             projectName={projectName}
             repositoryPath={repositoryPath}
             requirement={requirement}
+            plan={plan}
+            planFailures={planFailures}
             run={run}
             timeline={timeline}
             currentActivity={currentActivity}
@@ -587,6 +669,11 @@ function App(): React.JSX.Element {
             onRequirementChange={setRequirement}
             onSelectProject={() => void addProject()}
             onStartTask={() => void startTask()}
+            onConfirmPlan={() => void confirmCurrentPlan()}
+            onRetryFailedGroups={() => void confirmCurrentPlan(true)}
+            onMoveRequirement={(requirementId, targetGroupId) =>
+              void movePlanRequirement(requirementId, targetGroupId)
+            }
             onStopTask={() => void stopTask()}
             onAnswerInteraction={(input) => void answerInteraction(input)}
             providers={providers}
@@ -630,6 +717,8 @@ function SessionView({
   projectName,
   repositoryPath,
   requirement,
+  plan,
+  planFailures,
   run,
   timeline,
   currentActivity,
@@ -639,6 +728,9 @@ function SessionView({
   onRequirementChange,
   onSelectProject,
   onStartTask,
+  onConfirmPlan,
+  onRetryFailedGroups,
+  onMoveRequirement,
   onStopTask,
   onAnswerInteraction,
   providers,
@@ -650,6 +742,8 @@ function SessionView({
   projectName: string
   repositoryPath?: string
   requirement: string
+  plan?: GroupingPlan
+  planFailures: ConfirmPlanFailure[]
   run?: RunSnapshot
   timeline: TimelineEntry[]
   currentActivity?: ActivityEntry
@@ -659,6 +753,9 @@ function SessionView({
   onRequirementChange: (value: string) => void
   onSelectProject: () => void
   onStartTask: () => void
+  onConfirmPlan: () => void
+  onRetryFailedGroups: () => void
+  onMoveRequirement: (requirementId: string, targetGroupId: string) => void
   onStopTask: () => void
   onAnswerInteraction: (input: Omit<AnswerInteractionInput, 'idempotencyKey'>) => void
   providers: ProviderSummary[]
@@ -726,14 +823,27 @@ function SessionView({
               </div>
             </details>
           </div>
+        ) : plan ? (
+          <PlanPreview
+            plan={plan}
+            failures={planFailures}
+            busy={actionState === 'starting'}
+            onConfirm={onConfirmPlan}
+            onRetry={onRetryFailedGroups}
+            onMove={onMoveRequirement}
+          />
         ) : (
           <div className="empty-session">
             <div className="empty-mark" aria-hidden="true">
               P
             </div>
             <p className="eyebrow">PARALLEL CODING WORKSPACE</p>
-            <h1>从一个编码任务开始</h1>
-            <p>选择一个 Git 项目，描述你想完成的工作，ParaCode 会在隔离 worktree 中启动 Agent。</p>
+            <h1>从一个或一组编码任务开始</h1>
+            <p>
+              选择一个 Git
+              项目。一条需求会直接启动；多条需求（空行或编号列表）会先生成可编辑分组，确认后再并行创建
+              worktree。
+            </p>
           </div>
         )}
 
@@ -772,7 +882,7 @@ function SessionView({
                   : '回答 Agent 的问题，或选择下方选项'
                 : run
                   ? 'Agent 执行中，阻塞问题会出现在这里'
-                  : '描述一个要完成的编码任务，支持粘贴完整需求或 bug 列表'
+                  : '描述编码任务。多条需求可用空行或 1. / - 列表分开'
             }
             rows={run && !pendingInteraction ? 1 : 3}
             disabled={Boolean(run) && !pendingInteraction}
@@ -863,7 +973,7 @@ function SessionView({
                 onClick={onStartTask}
                 aria-label="启动编码任务"
               >
-                {actionState === 'starting' ? '创建中…' : '开始执行'}
+                {actionState === 'starting' ? '创建中…' : plan && !run ? '重新分析' : '开始执行'}
                 <span aria-hidden="true">↑</span>
               </button>
             )}
@@ -874,7 +984,9 @@ function SessionView({
             ? '回答后 Agent 会在当前 session 继续，不会新建任务。'
             : run
               ? '任务运行中。Agent 提问或请求授权时，可在此回答。'
-              : 'Enter 开始执行 · Shift + Enter 换行'}
+              : plan
+                ? '核对分组后确认创建。调整分组会增加版本，旧确认无效。'
+                : 'Enter 开始执行 · Shift + Enter 换行 · 多条需求用空行或编号列表'}
           {isRunning ? (
             <span className="live-hint">
               <span className="live-dot" />
@@ -885,6 +997,94 @@ function SessionView({
         {errorMessage ? <p className="error-message">{errorMessage}</p> : null}
       </div>
     </section>
+  )
+}
+
+function PlanPreview({
+  plan,
+  failures,
+  busy,
+  onConfirm,
+  onRetry,
+  onMove,
+}: {
+  plan: GroupingPlan
+  failures: ConfirmPlanFailure[]
+  busy: boolean
+  onConfirm: () => void
+  onRetry: () => void
+  onMove: (requirementId: string, targetGroupId: string) => void
+}): React.JSX.Element {
+  const confirmed = plan.status === 'confirmed' || plan.status === 'failed'
+  return (
+    <div className="plan-preview" aria-label="分组方案">
+      <div className="session-header">
+        <div>
+          <p className="eyebrow">分组方案 · 版本 {plan.version}</p>
+          <h1>确认后再创建 worktree</h1>
+          <p>每个分组会在独立 worktree 中启动一个 Agent。创建前可以移动需求或拆出新分组。</p>
+        </div>
+      </div>
+      <div className="plan-grid">
+        {plan.groups.map((group) => {
+          const failure = failures.find((item) => item.groupId === group.id)
+          return (
+            <article className="plan-card" key={group.id}>
+              <div className="plan-card-head">
+                <strong>{group.name}</strong>
+                {failure ? <span className="status-badge failed">创建失败</span> : null}
+              </div>
+              {group.requirementIds.map((requirementId) => {
+                const requirement = plan.requirements.find((item) => item.id === requirementId)
+                if (!requirement) return null
+                return (
+                  <div className="plan-requirement" key={requirement.id}>
+                    <p>{requirement.sourceText}</p>
+                    {confirmed ? null : (
+                      <label>
+                        移动到
+                        <select
+                          aria-label={`移动需求：${requirement.sourceText}`}
+                          disabled={busy}
+                          value={group.id}
+                          onChange={(event) => onMove(requirement.id, event.target.value)}
+                        >
+                          {plan.groups.map((option) => (
+                            <option value={option.id} key={option.id}>
+                              {option.name}
+                            </option>
+                          ))}
+                          <option value="new">新分组</option>
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )
+              })}
+              {failure ? <p className="error-message">{failure.message}</p> : null}
+            </article>
+          )
+        })}
+      </div>
+      <div className="plan-actions">
+        {confirmed && failures.length > 0 ? (
+          <button className="send-button" type="button" disabled={busy} onClick={onRetry}>
+            {busy ? '重试中…' : `重试 ${failures.length} 个失败分组`}
+          </button>
+        ) : null}
+        {confirmed ? null : (
+          <button
+            className="send-button"
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            aria-label={`确认创建 ${plan.groups.length} 个隔离 worktree`}
+          >
+            {busy ? '创建中…' : `确认创建 ${plan.groups.length} 个隔离 worktree`}
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -903,7 +1103,7 @@ function BoardView({
         <div>
           <p className="eyebrow">工作区概览</p>
           <h1>并行看板</h1>
-          <p>当前阶段展示真实 worktree 状态，更多并行任务将在分组流程接入后出现。</p>
+          <p>确认分组后，每个分组对应一个隔离 worktree，状态会实时显示在这里。</p>
         </div>
         <span className="view-summary">
           {runs.length > 0 ? `${runs.length} 个 worktree` : '暂无 worktree'}

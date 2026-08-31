@@ -1,4 +1,10 @@
-import type { AgentEvent, InteractionRequest, RunSnapshot, WorktreeRun } from '../../shared/ipc'
+import type {
+  AgentEvent,
+  GroupingPlan,
+  InteractionRequest,
+  RunSnapshot,
+  WorktreeRun,
+} from '../../shared/ipc'
 import type Database from 'better-sqlite3'
 import type { ParaCodeDatabase } from '../database/database'
 import type { RunRepository } from './types'
@@ -15,20 +21,24 @@ export class SqliteRunRepository implements RunRepository {
   private readonly getInteractionStatement: Database.Statement
   private readonly upsertInteractionStatement: Database.Statement
   private readonly appendEventStatement: Database.Statement
+  private readonly upsertPlanStatement: Database.Statement
+  private readonly getPlanStatement: Database.Statement
 
   constructor(database: ParaCodeDatabase) {
     this.database = database
     this.saveStatement = this.database.prepare(
       `INSERT INTO runs (
         id, repository_path, worktree_path, branch_name, base_ref, requirement,
-        agent_session_id, status, latest_message, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        grouping_plan_id, group_id, agent_session_id, status, latest_message, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         repository_path = excluded.repository_path,
         worktree_path = excluded.worktree_path,
         branch_name = excluded.branch_name,
         base_ref = excluded.base_ref,
         requirement = excluded.requirement,
+        grouping_plan_id = excluded.grouping_plan_id,
+        group_id = excluded.group_id,
         agent_session_id = excluded.agent_session_id,
         status = excluded.status,
         latest_message = excluded.latest_message,
@@ -62,6 +72,25 @@ export class SqliteRunRepository implements RunRepository {
         answer_json = excluded.answer_json,
         answered_at = excluded.answered_at`,
     )
+    this.upsertPlanStatement = this.database.prepare(
+      `INSERT INTO grouping_plans (
+        id, version, repository_path, base_ref, source_text, requirements_json,
+        groups_json, unassigned_json, group_runs_json, status, confirm_key, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        version = excluded.version,
+        repository_path = excluded.repository_path,
+        base_ref = excluded.base_ref,
+        source_text = excluded.source_text,
+        requirements_json = excluded.requirements_json,
+        groups_json = excluded.groups_json,
+        unassigned_json = excluded.unassigned_json,
+        group_runs_json = excluded.group_runs_json,
+        status = excluded.status,
+        confirm_key = excluded.confirm_key,
+        updated_at = excluded.updated_at`,
+    )
+    this.getPlanStatement = this.database.prepare('SELECT * FROM grouping_plans WHERE id = ?')
     this.appendEventStatement = this.database.prepare(
       `INSERT INTO agent_events (
         id, run_id, agent_session_id, sequence, timestamp, type, payload_json
@@ -80,6 +109,8 @@ export class SqliteRunRepository implements RunRepository {
         run.branchName,
         run.baseRef,
         run.requirement,
+        run.groupingPlanId,
+        run.groupId,
         run.agentSessionId,
         run.status,
         run.latestMessage,
@@ -146,6 +177,29 @@ export class SqliteRunRepository implements RunRepository {
     return (this.listInteractionsByRunStatement.all(runId) as InteractionRow[]).map(toInteraction)
   }
 
+  async savePlan(plan: GroupingPlan): Promise<void> {
+    this.upsertPlanStatement.run(
+      plan.id,
+      plan.version,
+      plan.repositoryPath,
+      plan.baseRef,
+      plan.sourceText,
+      JSON.stringify(plan.requirements),
+      JSON.stringify(plan.groups),
+      JSON.stringify(plan.unassigned),
+      JSON.stringify(plan.groupRuns),
+      plan.status,
+      plan.confirmKey,
+      plan.createdAt,
+      plan.updatedAt,
+    )
+  }
+
+  async getPlan(planId: string): Promise<GroupingPlan | undefined> {
+    const row = this.getPlanStatement.get(planId) as PlanRow | undefined
+    return row ? toPlan(row) : undefined
+  }
+
   async appendEvent(runId: string, event: AgentEvent): Promise<RunSnapshot | undefined> {
     const snapshot = await this.get(runId)
     if (!snapshot) throw new Error(`运行记录不存在：${runId}`)
@@ -186,6 +240,8 @@ interface RunRow {
   branch_name: string
   base_ref: string
   requirement: string
+  grouping_plan_id?: string | null
+  group_id?: string | null
   agent_session_id?: string | null
   status: string
   latest_message?: string | null
@@ -211,6 +267,8 @@ function toRun(row: RunRow): WorktreeRun {
     branchName: row.branch_name,
     baseRef: row.base_ref,
     requirement: row.requirement,
+    groupingPlanId: row.grouping_plan_id ?? undefined,
+    groupId: row.group_id ?? undefined,
     agentSessionId: row.agent_session_id ?? undefined,
     status: row.status as WorktreeRun['status'],
     latestMessage: row.latest_message ?? undefined,
@@ -274,5 +332,39 @@ function toEvent(row: EventRow): AgentEvent {
     timestamp: row.timestamp,
     type: row.type as AgentEvent['type'],
     payload: JSON.parse(row.payload_json) as AgentEvent['payload'],
+  }
+}
+
+interface PlanRow {
+  id: string
+  version: number
+  repository_path: string
+  base_ref: string
+  source_text: string
+  requirements_json: string
+  groups_json: string
+  unassigned_json: string
+  group_runs_json: string
+  status: string
+  confirm_key?: string | null
+  created_at: string
+  updated_at: string
+}
+
+function toPlan(row: PlanRow): GroupingPlan {
+  return {
+    id: row.id,
+    version: row.version,
+    repositoryPath: row.repository_path,
+    baseRef: row.base_ref,
+    sourceText: row.source_text,
+    requirements: JSON.parse(row.requirements_json) as GroupingPlan['requirements'],
+    groups: JSON.parse(row.groups_json) as GroupingPlan['groups'],
+    unassigned: JSON.parse(row.unassigned_json) as GroupingPlan['unassigned'],
+    groupRuns: JSON.parse(row.group_runs_json) as GroupingPlan['groupRuns'],
+    status: row.status as GroupingPlan['status'],
+    confirmKey: row.confirm_key ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
 }

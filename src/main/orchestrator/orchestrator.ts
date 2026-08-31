@@ -2,13 +2,20 @@ import { randomUUID } from 'node:crypto'
 
 import type {
   AgentEvent,
+  AnalyzePlanInput,
   AnswerInteractionInput,
+  ConfirmPlanInput,
+  ConfirmPlanResult,
+  GroupingPlan,
   InteractionRequest,
   RunSnapshot,
   RunStatus,
   StartTaskInput,
+  UpdatePlanInput,
   WorktreeRun,
 } from '../../shared/ipc'
+import { parseRequirementTexts } from '../../shared/requirements'
+import { moveRequirement, proposeGroupingPlan, requirementTextForGroup } from './grouping-planner'
 import { interactionFromEvent } from './interaction'
 import type { AgentProvider, Orchestrator, RunRepository, WorktreeManager } from './types'
 
@@ -36,6 +43,8 @@ export class DefaultOrchestrator implements Orchestrator {
       branchName: '',
       baseRef: input.baseRef ?? '',
       requirement: input.requirement.trim(),
+      groupingPlanId: input.groupingPlanId,
+      groupId: input.groupId,
       status: 'proposed' as RunStatus,
       createdAt: now,
       updatedAt: now,
@@ -162,6 +171,85 @@ export class DefaultOrchestrator implements Orchestrator {
 
   async listInteractions(): Promise<InteractionRequest[]> {
     return (await this.repository.listInteractions()).filter((item) => item.status === 'queued')
+  }
+
+  async analyzePlan(input: AnalyzePlanInput): Promise<GroupingPlan> {
+    const texts = parseRequirementTexts(input.text)
+    const plan = proposeGroupingPlan({
+      repositoryPath: input.repositoryPath,
+      baseRef: input.baseRef ?? '',
+      sourceText: input.text.trim(),
+      texts,
+    })
+    await this.repository.savePlan(plan)
+    return plan
+  }
+
+  async updatePlan(input: UpdatePlanInput): Promise<GroupingPlan> {
+    const plan = await this.requirePlan(input.planId)
+    if (plan.status === 'confirmed') throw new Error('分组方案已确认，不能再修改。')
+    if (plan.version !== input.version) throw new Error('分组方案已更新，请基于最新版本调整。')
+    const next = moveRequirement(plan, input.requirementId, input.targetGroupId)
+    await this.repository.savePlan(next)
+    return next
+  }
+
+  async confirmPlan(input: ConfirmPlanInput): Promise<ConfirmPlanResult> {
+    const plan = await this.requirePlan(input.planId)
+    if (plan.version !== input.version) throw new Error('分组方案已更新，请确认最新版本。')
+    if (plan.confirmKey === input.idempotencyKey) return this.toConfirmResult(plan)
+
+    await this.worktrees.validate?.({
+      repositoryPath: plan.repositoryPath,
+      requirement: plan.sourceText,
+      baseRef: plan.baseRef || undefined,
+    })
+
+    const pendingGroups = plan.groups.filter((group) => {
+      const existing = plan.groupRuns.find((item) => item.groupId === group.id)
+      return !existing || existing.status === 'failed'
+    })
+    const groupRuns = plan.groupRuns.filter((item) =>
+      pendingGroups.every((group) => group.id !== item.groupId),
+    )
+    const failures: ConfirmPlanResult['failures'] = []
+
+    for (const group of pendingGroups) {
+      try {
+        const snapshot = await this.startTask({
+          repositoryPath: plan.repositoryPath,
+          requirement: requirementTextForGroup(plan, group.id),
+          baseRef: plan.baseRef || undefined,
+          groupingPlanId: plan.id,
+          groupId: group.id,
+        })
+        const settled = await this.waitForWorktree(snapshot.run.id)
+        if (settled.run.status === 'failed' || !settled.run.worktreePath) {
+          failures.push({
+            groupId: group.id,
+            message: settled.run.latestMessage ?? '创建 worktree 失败。',
+          })
+          groupRuns.push({ groupId: group.id, runId: settled.run.id, status: 'failed' })
+        } else {
+          groupRuns.push({ groupId: group.id, runId: settled.run.id, status: 'creating' })
+        }
+      } catch (error) {
+        failures.push({
+          groupId: group.id,
+          message: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    const next: GroupingPlan = {
+      ...plan,
+      groupRuns,
+      confirmKey: input.idempotencyKey,
+      status: failures.length === plan.groups.length ? 'failed' : 'confirmed',
+      updatedAt: new Date().toISOString(),
+    }
+    await this.repository.savePlan(next)
+    return this.toConfirmResult(next)
   }
 
   async answerInteraction(input: AnswerInteractionInput): Promise<RunSnapshot> {
@@ -333,6 +421,49 @@ export class DefaultOrchestrator implements Orchestrator {
         item.status === 'queued' ? { ...item, status: 'canceled' } : item,
       ),
     })
+  }
+
+  private async requirePlan(planId: string): Promise<GroupingPlan> {
+    const plan = await this.repository.getPlan(planId)
+    if (!plan) throw new Error('分组方案不存在。')
+    return plan
+  }
+
+  private async waitForWorktree(runId: string): Promise<RunSnapshot> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      await this.waitForEvents(runId)
+      const snapshot = await this.getRunOrThrow(runId)
+      if (
+        snapshot.run.worktreePath ||
+        snapshot.run.status === 'failed' ||
+        snapshot.run.status === 'canceled'
+      ) {
+        return snapshot
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    throw new Error('创建 worktree 超时。')
+  }
+
+  private async toConfirmResult(plan: GroupingPlan): Promise<ConfirmPlanResult> {
+    const runs: RunSnapshot[] = []
+    const failures: ConfirmPlanResult['failures'] = []
+    for (const item of plan.groupRuns) {
+      const snapshot = await this.repository.get(item.runId)
+      if (item.status === 'failed') {
+        failures.push({
+          groupId: item.groupId,
+          message: snapshot?.run.latestMessage ?? '创建 worktree 失败。',
+        })
+        continue
+      }
+      if (snapshot) runs.push(snapshot)
+    }
+    for (const group of plan.groups) {
+      if (plan.groupRuns.some((item) => item.groupId === group.id)) continue
+      failures.push({ groupId: group.id, message: '尚未创建 worktree。' })
+    }
+    return { plan, runs, failures }
   }
 
   private async getRunOrThrow(runId: string): Promise<RunSnapshot> {

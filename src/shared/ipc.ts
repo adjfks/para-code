@@ -8,6 +8,9 @@ export const IPC_CHANNELS = {
   projectRemove: 'project:remove',
   startTask: 'run:start-task',
   stopTask: 'run:stop-task',
+  planAnalyze: 'plan:analyze',
+  planUpdate: 'plan:update',
+  planConfirm: 'plan:confirm',
   runList: 'run:list',
   runGet: 'run:get',
   runEvent: 'run:event',
@@ -53,6 +56,9 @@ export interface ParaCodeApi {
   removeProject: (id: string) => Promise<ProjectSummary[]>
   startTask: (input: StartTaskInput) => Promise<RunSnapshot>
   stopTask: (runId: string) => Promise<RunSnapshot>
+  analyzePlan: (input: AnalyzePlanInput) => Promise<GroupingPlan>
+  updatePlan: (input: UpdatePlanInput) => Promise<GroupingPlan>
+  confirmPlan: (input: ConfirmPlanInput) => Promise<ConfirmPlanResult>
   listRuns: () => Promise<WorktreeRun[]>
   getRun: (runId: string) => Promise<RunSnapshot>
   listInteractions: () => Promise<InteractionRequest[]>
@@ -141,6 +147,71 @@ export interface StartTaskInput {
   baseRef?: string
   providerId?: string
   model?: string
+  groupingPlanId?: string
+  groupId?: string
+}
+
+export type RequirementKind = 'bug' | 'feature' | 'performance' | 'refactor' | 'other'
+export type GroupingPlanStatus = 'ready' | 'editing' | 'confirmed' | 'failed'
+
+export interface Requirement {
+  id: string
+  sourceText: string
+  kind: RequirementKind
+}
+
+export interface PlanGroup {
+  id: string
+  name: string
+  requirementIds: string[]
+}
+
+export interface GroupingPlan {
+  id: string
+  version: number
+  repositoryPath: string
+  baseRef: string
+  sourceText: string
+  requirements: Requirement[]
+  groups: PlanGroup[]
+  unassigned: Array<{ requirementId: string; reason: string }>
+  groupRuns: Array<{ groupId: string; runId: string; status: 'creating' | 'failed' }>
+  status: GroupingPlanStatus
+  confirmKey?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AnalyzePlanInput {
+  repositoryPath: string
+  text: string
+  baseRef?: string
+  providerId?: string
+  model?: string
+}
+
+export interface UpdatePlanInput {
+  planId: string
+  version: number
+  requirementId: string
+  targetGroupId: string | 'new'
+}
+
+export interface ConfirmPlanInput {
+  planId: string
+  version: number
+  idempotencyKey: string
+}
+
+export interface ConfirmPlanFailure {
+  groupId: string
+  message: string
+}
+
+export interface ConfirmPlanResult {
+  plan: GroupingPlan
+  runs: RunSnapshot[]
+  failures: ConfirmPlanFailure[]
 }
 
 export interface WorktreeRun {
@@ -150,6 +221,8 @@ export interface WorktreeRun {
   branchName: string
   baseRef: string
   requirement: string
+  groupingPlanId?: string
+  groupId?: string
   agentSessionId?: string
   status: RunStatus
   latestMessage?: string

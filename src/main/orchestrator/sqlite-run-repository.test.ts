@@ -91,6 +91,34 @@ describe('SqliteRunRepository', () => {
     expect((await repository.listInteractions()).map((item) => item.id)).toEqual(['interaction-1'])
   })
 
+  it('persists grouping plans across reopen', async () => {
+    const snapshot = createSnapshot('run-plan')
+    await repository.save({
+      ...snapshot,
+      run: { ...snapshot.run, groupingPlanId: 'plan-1', groupId: 'group-1' },
+    })
+    await repository.savePlan({
+      id: 'plan-1',
+      version: 2,
+      repositoryPath: '/tmp/repository',
+      baseRef: 'main',
+      sourceText: '1. a\n2. b',
+      requirements: [{ id: 'req-1', sourceText: 'a', kind: 'feature' }],
+      groups: [{ id: 'group-1', name: '分组 A', requirementIds: ['req-1'] }],
+      unassigned: [],
+      groupRuns: [{ groupId: 'group-1', runId: 'run-plan', status: 'creating' }],
+      status: 'confirmed',
+      confirmKey: 'key-1',
+      createdAt: snapshot.run.createdAt,
+      updatedAt: snapshot.run.createdAt,
+    })
+
+    const loaded = await repository.getPlan('plan-1')
+    expect(loaded?.version).toBe(2)
+    expect(loaded?.groups[0]?.name).toBe('分组 A')
+    expect((await repository.get('run-plan'))?.run.groupingPlanId).toBe('plan-1')
+  })
+
   it('rejects an event for an unknown run', async () => {
     await expect(repository.appendEvent('missing', createEvent('missing', 1))).rejects.toThrow(
       '运行记录不存在',

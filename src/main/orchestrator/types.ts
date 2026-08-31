@@ -1,10 +1,15 @@
 import type {
   AgentEvent,
+  AnalyzePlanInput,
   AnswerInteractionInput,
+  ConfirmPlanInput,
+  ConfirmPlanResult,
+  GroupingPlan,
   InteractionAnswer,
   InteractionRequest,
   RunSnapshot,
   StartTaskInput,
+  UpdatePlanInput,
   WorktreeRun,
 } from '../../shared/ipc'
 
@@ -46,6 +51,8 @@ export interface RunRepository {
   listRuns(): Promise<WorktreeRun[]>
   listInteractions(): Promise<InteractionRequest[]>
   appendEvent(runId: string, event: AgentEvent): Promise<RunSnapshot | undefined>
+  savePlan(plan: GroupingPlan): Promise<void>
+  getPlan(planId: string): Promise<GroupingPlan | undefined>
 }
 
 export interface Orchestrator {
@@ -55,6 +62,9 @@ export interface Orchestrator {
   listRuns(): Promise<WorktreeRun[]>
   listInteractions(): Promise<InteractionRequest[]>
   answerInteraction(input: AnswerInteractionInput): Promise<RunSnapshot>
+  analyzePlan(input: AnalyzePlanInput): Promise<GroupingPlan>
+  updatePlan(input: UpdatePlanInput): Promise<GroupingPlan>
+  confirmPlan(input: ConfirmPlanInput): Promise<ConfirmPlanResult>
   onEvent(listener: (event: AgentEvent) => void): () => void
 }
 
