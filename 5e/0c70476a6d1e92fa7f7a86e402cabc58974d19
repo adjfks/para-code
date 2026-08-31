@@ -1,0 +1,109 @@
+src/shared/ipc.ts
+  s_816dbccc4381df::t_86cdfadc5e4228 58-59
+  s_816dbccc4381df::t_ee39e365b5c268 129
+  s_816dbccc4381df::t_61693502641454 194-234,238
+  s_816dbccc4381df::t_3ae21ccdfb3040 14-15
+src/main/orchestrator/memory-repository.ts
+  s_816dbccc4381df::t_85f4e999dea3d0 11-12
+  s_816dbccc4381df::t_5382d9ef40260f 1,8-10,13,17-18,34-38
+  s_816dbccc4381df::t_5da6243f01f63c 41-57
+src/main/orchestrator/orchestrator.ts
+  s_816dbccc4381df::t_144946b1356e76 144
+  s_816dbccc4381df::t_fef14bef097a05 234-238,243
+  s_816dbccc4381df::t_2be9a7f39cac38 5-6,12
+  s_816dbccc4381df::t_aaac84cab036e5 20
+  s_816dbccc4381df::t_6ea9b8fd9a3c69 163-174,177-179
+  s_816dbccc4381df::t_afcc73b28cb038 46
+  s_816dbccc4381df::t_aa7a807134695d 359
+  s_816dbccc4381df::t_a6fd8a866b647b 175-176,313-314,318-322
+  s_816dbccc4381df::t_c7dd192e644d96 273-312,315-317,323-337
+src/main/database/database.ts
+  s_816dbccc4381df::t_c68726efd06d97 89-111
+  s_816dbccc4381df::t_585769543e14ed 5
+src/main/orchestrator/sqlite-run-repository.test.ts
+  s_816dbccc4381df::t_f04389d80d4346 59-93
+  s_816dbccc4381df::t_b1fd3d92e3f675 137
+src/main/database/migrations/0002_interactions.sql
+  s_816dbccc4381df::t_dd7eb96543bf8f 1-21
+src/main/orchestrator/fake-agent.ts
+  s_816dbccc4381df::t_11bdf3c9fdfa2b 41,46-55
+  s_816dbccc4381df::t_77adced0a0f295 100-111
+  s_816dbccc4381df::t_ba8689197ac60d 240-255
+  s_816dbccc4381df::t_a97b770bb9c848 3,9
+src/main/ipc.ts
+  s_816dbccc4381df::t_c64950839fd480 101-102,105-106
+  s_816dbccc4381df::t_dce137567b9946 188,197-200
+  s_816dbccc4381df::t_a6fd8a866b647b 103-104
+  s_816dbccc4381df::t_67586bd561b9e8 11
+src/renderer/src/styles.css
+  s_816dbccc4381df::t_9a7aeef1acd0ee 1159-1171
+README.md
+  s_816dbccc4381df::t_3eb2b54c8c9482 9-13
+src/main/orchestrator/orchestrator.test.ts
+  s_816dbccc4381df::t_a6fd8a866b647b 35,123,155-157
+  s_816dbccc4381df::t_baf574f3d59a95 36-44
+  s_816dbccc4381df::t_3f947744807d65 108-122,124-154,158-166
+src/main/orchestrator/interaction.test.ts
+  s_816dbccc4381df::t_cac8fc6a198f9b 1-59
+src/main/orchestrator/codex-app-server.ts
+  s_816dbccc4381df::t_7d8e2d29085bcb 5-6
+  s_816dbccc4381df::t_ba416cfaf391fa 262-265
+  s_816dbccc4381df::t_8d9dff9924ef5f 288
+  s_816dbccc4381df::t_60d75aaaf6d14f 16
+  s_816dbccc4381df::t_07b6ef13219800 130-142
+  s_816dbccc4381df::t_dbce558c17ebfc 238-241
+src/main/orchestrator/sqlite-run-repository.ts
+  s_816dbccc4381df::t_24b16620cacea2 141-148
+  s_816dbccc4381df::t_a6e2f652295739 75-90,92-118,124-130
+  s_816dbccc4381df::t_bed37a191010d8 44-64
+  s_816dbccc4381df::t_60e6fef807617f 13-16
+  s_816dbccc4381df::t_866da266f6707c 1
+  s_816dbccc4381df::t_a6fd8a866b647b 91
+  s_816dbccc4381df::t_f7c750112958d5 119
+  s_816dbccc4381df::t_c00ad62191b795 222-267
+src/renderer/src/App.tsx
+  s_816dbccc4381df::t_57e0abb54e4dd8 656,663
+  s_816dbccc4381df::t_a6fd8a866b647b 200-203,318-320,685-689,837-839
+  s_816dbccc4381df::t_3e360cd7004185 1963-1971
+  s_816dbccc4381df::t_0d0a16fad490e5 6,8
+  s_816dbccc4381df::t_0ec731750ccfd2 584,591
+  s_816dbccc4381df::t_e630e1e4d4e72a 675-676,679-683,690,694-702
+  s_816dbccc4381df::t_186e10c95c88c0 221-224
+  s_816dbccc4381df::t_783769818829b1 610-615
+  s_816dbccc4381df::t_19025b872cd784 948-949,951,953-956,958,965,967,969,971-972,974-975,977-1019
+  s_816dbccc4381df::t_ea0ac099d0dff0 105-110
+  s_816dbccc4381df::t_da3f097740d4e0 194-199,204
+  s_816dbccc4381df::t_f34352e9e48004 372
+  s_816dbccc4381df::t_83276e90077cd5 321-338
+  s_816dbccc4381df::t_f223800112533f 761-766,769-775,777-779,781-815,832-836,840-857,873-877
+  s_816dbccc4381df::t_95ed0612dacc0a 636,643
+  s_816dbccc4381df::t_a3bde7ab3d0dc7 1821-1831
+  s_816dbccc4381df::t_ec6a9de216402f 79
+src/shared/ipc.test.ts
+  s_816dbccc4381df::t_f40f19f8c99892 13-14
+src/main/orchestrator/types.ts
+  s_816dbccc4381df::t_c485c9776a3422 1-9
+  s_816dbccc4381df::t_8e1380a5b8a009 36-40,47,56-57
+CHANGELOG.md
+  s_816dbccc4381df::t_cfdca59c9abf7a 12-13
+src/preload/index.ts
+  s_816dbccc4381df::t_2cc6a8443a48a0 17-18
+src/main/orchestrator/interaction.ts
+  s_816dbccc4381df::t_6929285da377bb 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "5e0c70476a6d1e92fa7f7a86e402cabc58974d19",
+  "prompts": {},
+  "sessions": {
+    "s_816dbccc4381df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "205d4135-a8b4-479d-805a-9a5a4344db8f",
+        "model": "grok-4.6"
+      },
+      "human_author": "ptsu <ptsu@trip.com>"
+    }
+  }
+}
