@@ -1,6 +1,11 @@
 export const IPC_CHANNELS = {
   appInfo: 'app:get-info',
-  selectProject: 'project:select',
+  projectList: 'project:list',
+  projectAdd: 'project:add',
+  projectSelectPath: 'project:select-path',
+  projectSetCurrent: 'project:set-current',
+  projectValidate: 'project:validate',
+  projectRemove: 'project:remove',
   startTask: 'run:start-task',
   stopTask: 'run:stop-task',
   runEvent: 'run:event',
@@ -20,9 +25,28 @@ export interface AppInfo {
   arch: string
 }
 
+export type ProjectHealth = 'valid' | 'invalid' | 'unknown'
+
+export interface ProjectSummary {
+  id: string
+  name: string
+  repositoryPath: string
+  defaultBaseRef?: string
+  isCurrent: boolean
+  health: ProjectHealth
+  healthMessage?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ParaCodeApi {
   getAppInfo: () => Promise<AppInfo>
-  selectProject: () => Promise<string | undefined>
+  listProjects: () => Promise<ProjectSummary[]>
+  addProject: (repositoryPath: string) => Promise<ProjectSummary[]>
+  selectProjectPath: () => Promise<string | undefined>
+  setCurrentProject: (id: string) => Promise<ProjectSummary[]>
+  validateProject: (id: string) => Promise<ProjectSummary[]>
+  removeProject: (id: string) => Promise<ProjectSummary[]>
   startTask: (input: StartTaskInput) => Promise<RunSnapshot>
   stopTask: (runId: string) => Promise<RunSnapshot>
   onRunEvent: (listener: (event: AgentEvent) => void) => () => void

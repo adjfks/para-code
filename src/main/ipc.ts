@@ -5,6 +5,7 @@ import path from 'node:path'
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type ProjectSummary,
   type ProviderConfigInput,
   type ProviderSummary,
   type ProviderTestResult,
@@ -15,6 +16,8 @@ import { DefaultOrchestrator } from './orchestrator/orchestrator'
 import { FakeAgentProvider } from './orchestrator/fake-agent'
 import { GitWorktreeManager } from './orchestrator/git-worktree'
 import { MemoryRunRepository } from './orchestrator/memory-repository'
+import { ProjectService } from './projects/project-service'
+import { ProjectStore } from './projects/project-store'
 import { listOpenAICompatibleModels } from './providers/openai-compatible'
 import { ProviderStore } from './providers/provider-store'
 
@@ -28,9 +31,16 @@ const providerStore = new ProviderStore(
   path.join(app.getPath('userData'), 'providers.json'),
   path.join(app.getPath('userData'), 'providers.secrets.json'),
 )
+const projectStore = new ProjectStore(
+  path.join(app.getPath('userData'), 'projects.json'),
+  new ProjectService(),
+)
 
 export function registerIpcHandlers(): void {
   void providerStore.load()
+  void projectStore.load().catch((error) => {
+    console.error('加载项目配置失败：', error)
+  })
 
   ipcMain.handle(IPC_CHANNELS.appInfo, (): AppInfo => ({
     name: app.getName(),
@@ -39,13 +49,31 @@ export function registerIpcHandlers(): void {
     arch: process.arch,
   }))
 
-  ipcMain.handle(IPC_CHANNELS.selectProject, async () => {
+  ipcMain.handle(IPC_CHANNELS.projectList, async (): Promise<ProjectSummary[]> =>
+    projectStore.list(),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.projectAdd, async (_event, repositoryPath: string) =>
+    projectStore.add(repositoryPath),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.projectSelectPath, async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory'],
-      title: '选择 Git 项目',
+      title: '添加 Git 项目',
     })
     return result.canceled ? undefined : result.filePaths[0]
   })
+
+  ipcMain.handle(IPC_CHANNELS.projectSetCurrent, async (_event, id: string) =>
+    projectStore.setCurrent(id),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.projectValidate, async (_event, id: string) =>
+    projectStore.validate(id),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.projectRemove, async (_event, id: string) => projectStore.remove(id))
 
   ipcMain.handle(IPC_CHANNELS.startTask, async (_event, input: StartTaskInput) => {
     validateTaskProvider(input)

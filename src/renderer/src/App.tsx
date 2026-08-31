@@ -4,6 +4,7 @@ import type {
   AgentEvent,
   AgentEventPayload,
   AppInfo,
+  ProjectSummary,
   ProviderSummary,
   RunSnapshot,
   RunStatus,
@@ -66,6 +67,8 @@ function App(): React.JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [repositoryPath, setRepositoryPath] = useState<string>()
+  const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [projectState, setProjectState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [requirement, setRequirement] = useState('')
   const [run, setRun] = useState<RunSnapshot>()
   const [events, setEvents] = useState<AgentEvent[]>([])
@@ -84,6 +87,26 @@ function App(): React.JSX.Element {
         setLoadState('ready')
       })
       .catch(() => setLoadState('error'))
+  }, [])
+
+  useEffect(() => {
+    let canceled = false
+    setProjectState('loading')
+    window.paracode
+      .listProjects()
+      .then((items) => {
+        if (canceled) return
+        setProjects(items)
+        const current = items.find((item) => item.isCurrent)
+        setRepositoryPath(current?.repositoryPath)
+        setProjectState('ready')
+      })
+      .catch(() => {
+        if (!canceled) setProjectState('error')
+      })
+    return () => {
+      canceled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -132,6 +155,15 @@ function App(): React.JSX.Element {
 
   const timeline = useMemo(() => buildTimeline(events), [events])
   const projectName = projectLabel(repositoryPath)
+  const currentProject = projects.find((project) => project.isCurrent)
+  const currentProjectHealthLabel =
+    currentProject?.health === 'invalid'
+      ? '项目不可用'
+      : projectState === 'loading'
+        ? '项目校验中'
+        : currentProject
+          ? '项目可用'
+          : '未选择项目'
   const runStatus = run ? STATUS_LABELS[run.run.status] : '尚未启动'
   const queueCount = events.filter(
     (event) => event.type === 'question' || event.type === 'approval_request',
@@ -140,15 +172,68 @@ function App(): React.JSX.Element {
     .flatMap((entry) => (entry.kind === 'activityGroup' ? (entry.items ?? []) : []))
     .find((entry) => entry.status === 'running')
 
-  async function selectProject(): Promise<void> {
+  async function addProject(): Promise<void> {
     try {
-      const selected = await window.paracode.selectProject()
-      if (selected) {
-        setRepositoryPath(selected)
-        setErrorMessage(undefined)
-      }
+      const repositoryPath = await window.paracode.selectProjectPath()
+      if (!repositoryPath) return
+      setProjectState('loading')
+      const nextProjects = await window.paracode.addProject(repositoryPath)
+      setProjects(nextProjects)
+      const current = nextProjects.find((item) => item.isCurrent)
+      setRepositoryPath(current?.repositoryPath)
+      setProjectState('ready')
+      setErrorMessage(undefined)
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '选择项目失败')
+      setProjectState('ready')
+      setErrorMessage(error instanceof Error ? error.message : '添加项目失败')
+    }
+  }
+
+  async function selectProject(id: string): Promise<void> {
+    try {
+      setProjectState('loading')
+      const nextProjects = await window.paracode.setCurrentProject(id)
+      setProjects(nextProjects)
+      const current = nextProjects.find((item) => item.isCurrent)
+      setRepositoryPath(current?.repositoryPath)
+      setProjectState('ready')
+      setErrorMessage(undefined)
+    } catch (error) {
+      setProjectState('ready')
+      setErrorMessage(error instanceof Error ? error.message : '切换项目失败')
+    }
+  }
+
+  async function validateProject(id: string): Promise<void> {
+    try {
+      setProjectState('loading')
+      setProjects(await window.paracode.validateProject(id))
+      setProjectState('ready')
+    } catch (error) {
+      setProjectState('ready')
+      setErrorMessage(error instanceof Error ? error.message : '检查项目失败')
+    }
+  }
+
+  async function removeProject(id: string): Promise<void> {
+    try {
+      const nextProjects = await window.paracode.removeProject(id)
+      setProjects(nextProjects)
+      const current = nextProjects.find((item) => item.isCurrent)
+      setRepositoryPath(current?.repositoryPath)
+      setErrorMessage(undefined)
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '移除项目失败')
+    }
+  }
+
+  async function validateProjects(): Promise<void> {
+    try {
+      setProjectState('loading')
+      setProjects(await window.paracode.listProjects())
+      setProjectState('ready')
+    } catch {
+      setProjectState('error')
     }
   }
 
@@ -252,12 +337,61 @@ function App(): React.JSX.Element {
           </button>
         </nav>
 
-        <div className="sidebar-section">
-          <p className="sidebar-label">当前项目</p>
-          <div className={`project-item ${repositoryPath ? '' : 'muted'}`} title={repositoryPath}>
-            <span className="project-dot" aria-hidden="true" />
-            <span>{projectName}</span>
+        <div className="sidebar-section project-section">
+          <p className="sidebar-label">项目</p>
+          {projectState === 'loading' ? (
+            <p className="sidebar-empty" role="status">
+              正在读取项目…
+            </p>
+          ) : null}
+          {projectState === 'error' ? (
+            <div className="sidebar-project-error">
+              <p>项目列表读取失败</p>
+              <button type="button" onClick={() => void validateProjects()}>
+                重试
+              </button>
+            </div>
+          ) : null}
+          {projectState !== 'error' && projects.length === 0 ? (
+            <p className="sidebar-empty">还没有添加项目</p>
+          ) : null}
+          <div className="project-list">
+            {projects.map((project) => (
+              <div className={`project-item ${project.isCurrent ? 'active' : ''}`} key={project.id}>
+                <button
+                  className="project-select"
+                  type="button"
+                  onClick={() => void selectProject(project.id)}
+                  aria-current={project.isCurrent ? 'true' : undefined}
+                >
+                  <span className={`project-dot ${project.health}`} aria-hidden="true" />
+                  <span className="project-name">{project.name}</span>
+                </button>
+                {project.health === 'invalid' ? (
+                  <button
+                    className="project-action"
+                    type="button"
+                    onClick={() => void validateProject(project.id)}
+                    title={project.healthMessage}
+                  >
+                    重新检查
+                  </button>
+                ) : null}
+                <button
+                  className="project-action remove"
+                  type="button"
+                  onClick={() => void removeProject(project.id)}
+                  aria-label={`从列表移除 ${project.name}`}
+                  title="从列表移除，不删除文件"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
           </div>
+          <button className="add-project" type="button" onClick={() => void addProject()}>
+            添加 Git 项目
+          </button>
         </div>
 
         <div className="sidebar-section session-section">
@@ -332,9 +466,7 @@ function App(): React.JSX.Element {
               count={queueCount}
             />
           </div>
-          <button className="secondary-button" type="button" onClick={() => void selectProject()}>
-            打开项目
-          </button>
+          <span className="topbar-project-health">{currentProjectHealthLabel}</span>
         </header>
 
         {activeView === 'session' ? (
@@ -348,7 +480,7 @@ function App(): React.JSX.Element {
             actionState={actionState}
             errorMessage={errorMessage}
             onRequirementChange={setRequirement}
-            onSelectProject={() => void selectProject()}
+            onSelectProject={() => void addProject()}
             onStartTask={() => void startTask()}
             onStopTask={() => void stopTask()}
             providers={providers}
@@ -501,7 +633,7 @@ function SessionView({
             <div className="composer-context">
               <button className="composer-chip" type="button" onClick={onSelectProject}>
                 <span aria-hidden="true">□</span>
-                {repositoryPath ? projectName : '选择 Git 项目'}
+                {repositoryPath ? projectName : '添加 Git 项目'}
               </button>
               <ModelPicker
                 providers={providers}
