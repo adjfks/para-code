@@ -1,0 +1,91 @@
+src/main/orchestrator/memory-repository.ts
+  s_816dbccc4381df::t_5fd31126d2a68f 1-7
+  s_816dbccc4381df::t_7fde667c075ced 12
+  s_816dbccc4381df::t_48e51988c0780b 47-55
+src/shared/ipc.ts
+  s_816dbccc4381df::t_a020c444835ddc 59-61
+  s_816dbccc4381df::t_53562ca0c548cd 11-13
+  s_816dbccc4381df::t_f551331615eb9b 150-214,224-225
+src/main/orchestrator/grouping-flow.test.ts
+  s_816dbccc4381df::t_8d2e2cc58f241e 1-172
+src/main/database/database.ts
+  s_816dbccc4381df::t_8246ec2f770f84 112-134
+  s_816dbccc4381df::t_2fe2a1f321a049 5
+src/main/orchestrator/grouping-planner.ts
+  s_816dbccc4381df::t_527ac82d9a0ce9 1-97
+src/main/ipc.ts
+  s_816dbccc4381df::t_46e1b21d4417e1 92-104
+  s_816dbccc4381df::t_e16258a37cbd21 11,13,15
+src/shared/requirements.ts
+  s_816dbccc4381df::t_6f6977c763dbdd 2-23
+CHANGELOG.md
+  s_816dbccc4381df::t_3d0f3723a6e176 14
+README.md
+  s_816dbccc4381df::t_761c3f8ad89562 10,12,14
+src/main/orchestrator/sqlite-run-repository.ts
+  s_816dbccc4381df::t_8fe52370551d25 112-113
+  s_816dbccc4381df::t_2fdaba683100b1 270-271
+  s_816dbccc4381df::t_9f126ea5feaf26 24-25
+  s_816dbccc4381df::t_6f35f9517eae68 243-244
+  s_816dbccc4381df::t_d5378ae8cdc87e 75-93
+  s_816dbccc4381df::t_0b556840f673c3 337-370
+  s_816dbccc4381df::t_0cd225e8c861b3 1-7
+  s_816dbccc4381df::t_c5abf9787eaf02 32-33,40-41
+  s_816dbccc4381df::t_92076dfc27c816 180-202
+src/main/orchestrator/grouping-planner.test.ts
+  s_816dbccc4381df::t_87aee3cf03e629 1-61
+src/main/orchestrator/orchestrator.ts
+  s_816dbccc4381df::t_79c257c45f3837 5,7-9,14,17-18
+  s_816dbccc4381df::t_0c5e79eb98ddcd 426-468
+  s_816dbccc4381df::t_0f2352109a7c86 46-47
+  s_816dbccc4381df::t_281ef03c43f276 176-254
+src/shared/requirements.test.ts
+  s_816dbccc4381df::t_ecd8d8df9c32e5 1-29
+src/main/orchestrator/types.ts
+  s_816dbccc4381df::t_9a7caf5f61a1c8 3,5-7,12
+  s_816dbccc4381df::t_6259df815b63e0 54-55,65-67
+src/main/database/migrations/0003_grouping_plans.sql
+  s_816dbccc4381df::t_66d1c247f4d5be 1-21
+src/main/orchestrator/sqlite-run-repository.test.ts
+  s_816dbccc4381df::t_ee6839885ee57d 94-121
+src/preload/index.ts
+  s_816dbccc4381df::t_dbc0da721d902c 15-17
+src/shared/ipc.test.ts
+  s_816dbccc4381df::t_b3e23cffe5f99b 15-17
+src/renderer/src/App.tsx
+  s_816dbccc4381df::t_84a1092ffc416a 885
+  s_816dbccc4381df::t_71dc4912e0c8b9 1106
+  s_816dbccc4381df::t_9cb2596f7668a9 661-662
+  s_816dbccc4381df::t_031bd73e1035a8 8-9,19
+  s_816dbccc4381df::t_7108112a1afcd0 1003-1090
+  s_816dbccc4381df::t_0387400c05d40e 826-834,841-842,845-846
+  s_816dbccc4381df::t_414ef528528004 79-80
+  s_816dbccc4381df::t_18a83a2c951c3c 745-746
+  s_816dbccc4381df::t_4f39b0c1a99f15 672-676
+  s_816dbccc4381df::t_a3e6b9187697df 987-989
+  s_816dbccc4381df::t_3e4a1565db66c7 307-321,338-366,370-374,379,385-392
+  s_816dbccc4381df::t_d895be6b7c00b9 756-758
+  s_816dbccc4381df::t_e54c72fe2f8d9a 380-384
+  s_816dbccc4381df::t_62b219fc73beb2 439-440
+  s_816dbccc4381df::t_bc266e4c90e5cd 720-721,731-733
+  s_816dbccc4381df::t_7ef081e0baf233 976
+  s_816dbccc4381df::t_a921deabfac7d4 367-369,375-378,843-844
+src/renderer/src/styles.css
+  s_816dbccc4381df::t_33b8a91388ba96 1735-1804
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "30320ae7e752a409a2482846daa7ab46d8cc1a2b",
+  "prompts": {},
+  "sessions": {
+    "s_816dbccc4381df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "205d4135-a8b4-479d-805a-9a5a4344db8f",
+        "model": "grok-4.6"
+      },
+      "human_author": "ptsu <ptsu@trip.com>"
+    }
+  }
+}
