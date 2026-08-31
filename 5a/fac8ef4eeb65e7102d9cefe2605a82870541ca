@@ -1,0 +1,25 @@
+src/main/ipc.ts
+  s_261da88678a935::t_f6750805e53bb1 76
+src/main/projects/project-service.ts
+  s_261da88678a935::t_f6750805e53bb1 1-57
+src/renderer/src/App.tsx
+  s_261da88678a935::t_f6750805e53bb1 367-390,392-394,469,483,636
+src/main/projects/project-store.test.ts
+  s_261da88678a935::t_f6750805e53bb1 20-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "5afac8ef4eeb65e7102d9cefe2605a82870541ca",
+  "prompts": {},
+  "sessions": {
+    "s_261da88678a935": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a046f6-4712-7300-8cf7-6740ea765cc3",
+        "model": "glm-5.3"
+      },
+      "human_author": "ptsu <ptsu@trip.com>"
+    }
+  }
+}
