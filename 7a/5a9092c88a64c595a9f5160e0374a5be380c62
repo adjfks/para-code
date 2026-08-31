@@ -1,0 +1,44 @@
+pnpm-lock.yaml
+  ai_agent 10-12,23-25,1221-1226,1613-1619,2931-2937,4482-4485,4789-4792,5626
+src/shared/ipc.test.ts
+  s_d4eced17c1afb2::t_e33e26e453f768 9-13
+package.json
+  s_d4eced17c1afb2::t_9dd439334672b1 30,36
+src/main/orchestrator/sqlite-run-repository.ts
+  s_d4eced17c1afb2::t_48c1afe5caa108 14-46
+  s_d4eced17c1afb2::t_022a7ad9da1ca1 4-6,48-65,70,74,78-106
+  s_d4eced17c1afb2::t_184882011df764 67
+  s_d4eced17c1afb2::t_1e452735aed0fe 2
+  s_d4eced17c1afb2::t_75bdaec5b61fa2 66,71,75
+src/main/orchestrator/memory-repository.ts
+  s_d4eced17c1afb2::t_75bdaec5b61fa2 16
+src/main/orchestrator/orchestrator.ts
+  s_d4eced17c1afb2::t_d8907306f2b941 208-211
+src/main/ipc.ts
+  s_d4eced17c1afb2::t_19a4a4a675393b 42-44
+  s_d4eced17c1afb2::t_d8907306f2b941 37
+src/main/orchestrator/sqlite-run-repository.test.ts
+  s_d4eced17c1afb2::t_2a5e8d8ff7a3ab 31
+src/renderer/src/styles.css
+  s_d4eced17c1afb2::t_d8907306f2b941 1689
+  s_d4eced17c1afb2::t_c01a852ac9ced1 1609-1616,1650-1651,1687-1688
+src/renderer/src/App.tsx
+  s_d4eced17c1afb2::t_d8907306f2b941 176-184,288,325-336,457-471,782
+  s_d4eced17c1afb2::t_c01a852ac9ced1 11,755-756,759-761,771-773,775-781,783-799
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "7a5a9092c88a64c595a9f5160e0374a5be380c62",
+  "prompts": {},
+  "sessions": {
+    "s_d4eced17c1afb2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a055c5-cc9c-72b3-bf30-8586cf84d2b6",
+        "model": "glm-5.3"
+      },
+      "human_author": "ptsu <ptsu@trip.com>"
+    }
+  }
+}
